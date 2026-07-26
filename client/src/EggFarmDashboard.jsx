@@ -5,26 +5,10 @@ import {
 } from 'recharts';
 import {
   DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
-  LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff,
+  LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff, LogOut,
 } from 'lucide-react';
 import * as api from './lib/api';
-
-const COLORS = {
-  ink: '#2A2118',
-  inkSoft: '#6B6255',
-  muted: '#A39A8A',
-  paper: '#E7EBDA',
-  card: '#FDFBF5',
-  cardBorder: '#E3DEC9',
-  barnwood: '#47301F',
-  yolk: '#E5A62E',
-  moss: '#4D7A3E',
-  brick: '#9B4433',
-  inputBorder: '#D9D2C0',
-};
-
-const FONT_DISPLAY = "'Bitter', Georgia, serif";
-const FONT_BODY = "'Work Sans', -apple-system, BlinkMacSystemFont, sans-serif";
+import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle } from './lib/theme';
 
 const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large'];
 const EXPENSE_ITEMS = ['Feeds', 'Fly Trap', 'Medicines/Vitamins', 'Others'];
@@ -46,9 +30,6 @@ const EXPENSE_COLORS = {
 };
 
 const PERIOD_LIMITS = { daily: 30, weekly: 12, monthly: 12, yearly: 6 };
-
-const inputClasses = "w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent";
-const inputStyle = { backgroundColor: '#FFFFFF', border: `1px solid ${COLORS.inputBorder}`, color: COLORS.ink, fontFamily: FONT_BODY };
 
 function parseDateLocal(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -157,7 +138,7 @@ function StampBadge({ icon, color, size = 44 }) {
   );
 }
 
-function Header() {
+function Header({ username, onLogout }) {
   return (
     <header className="px-4 py-4 shadow-md" style={{ backgroundColor: COLORS.barnwood }}>
       <div className="max-w-4xl mx-auto flex items-center gap-3">
@@ -167,12 +148,28 @@ function Header() {
         >
           <span style={{ transform: 'rotate(6deg)' }} className="text-lg">🥚</span>
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="text-lg font-bold tracking-tight text-white" style={{ fontFamily: FONT_DISPLAY }}>
             Egg Farm Ledger
           </h1>
           <p className="text-xs" style={{ color: COLORS.yolk, fontFamily: FONT_BODY }}>Sales &amp; expense tracker</p>
         </div>
+        {onLogout && (
+          <div className="flex items-center gap-2">
+            {username && (
+              <span className="text-xs hidden sm:inline" style={{ color: COLORS.yolk, fontFamily: FONT_BODY }}>{username}</span>
+            )}
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
+              style={{ color: 'white', border: `1px solid ${COLORS.yolk}66`, fontFamily: FONT_BODY }}
+            >
+              <LogOut size={14} />
+              Log out
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
@@ -718,7 +715,7 @@ function TabBar({ tab, setTab }) {
   );
 }
 
-export default function EggFarmDashboard() {
+export default function EggFarmDashboard({ username, onLogout }) {
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [harvests, setHarvests] = useState([]);
@@ -856,7 +853,7 @@ export default function EggFarmDashboard() {
 
   return (
     <div className="min-h-screen pb-24" style={{ backgroundColor: COLORS.paper, fontFamily: FONT_BODY, color: COLORS.ink }}>
-      <Header />
+      <Header username={username} onLogout={onLogout} />
       <main className="max-w-4xl mx-auto px-4 pt-4">
         {error && <ErrorBanner message={error} onClose={() => setErrorMsg('')} />}
         {tab === 'dashboard' && (

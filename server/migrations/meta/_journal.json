@@ -15,6 +15,13 @@
       "when": 1784993229524,
       "tag": "0001_wise_pride",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785051125406,
+      "tag": "0002_lively_red_shift",
+      "breakpoints": true
     }
   ]
 }

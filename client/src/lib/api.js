@@ -3,13 +3,35 @@ const BASE_URL = import.meta.env.VITE_API_URL;
 async function request(path, options) {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    // The API and client live on different domains in production, so the
+    // login cookie only gets sent/accepted cross-origin if every request
+    // opts in with credentials: 'include' — without it every call looks
+    // logged-out even right after a successful login.
+    credentials: 'include',
     ...options,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
+    const error = new Error(body.error || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
   }
   return res.status === 204 ? null : res.json();
+}
+
+export async function login(username, password) {
+  return request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export async function logout() {
+  await request('/api/auth/logout', { method: 'POST' });
+}
+
+export async function getCurrentUser() {
+  return request('/api/auth/me');
 }
 
 // The API returns Drizzle's column names (saleDate, numeric fields as

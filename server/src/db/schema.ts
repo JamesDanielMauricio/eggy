@@ -16,6 +16,13 @@ import {
 export const EGG_SIZES = ["Extra Small", "Small", "Medium", "Large", "Extra Large"] as const;
 export const EXPENSE_ITEMS = ["Feeds", "Fly Trap", "Medicines/Vitamins", "Others"] as const;
 
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
 export const sales = pgTable(
   "sales",
   {
