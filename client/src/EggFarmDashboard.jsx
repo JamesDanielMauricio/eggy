@@ -157,7 +157,7 @@ function Header({ username, onLogout }) {
         {onLogout && (
           <div className="flex items-center gap-2">
             {username && (
-              <span className="text-xs hidden sm:inline" style={{ color: COLORS.yolk, fontFamily: FONT_BODY }}>{username}</span>
+              <span className="text-xs" style={{ color: COLORS.yolk, fontFamily: FONT_BODY }}>{username}</span>
             )}
             <button
               type="button"

@@ -1,4 +1,7 @@
-const BASE_URL = import.meta.env.VITE_API_URL;
+// Empty string = relative paths, i.e. same-origin requests through the
+// Vercel rewrite in vercel.json (see request() below for why that matters).
+// Local dev still sets VITE_API_URL to hit the local server directly.
+const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 async function request(path, options) {
   const res = await fetch(`${BASE_URL}${path}`, {
