@@ -1,0 +1,14 @@
+{
+  "name": "Egg Farm Ledger",
+  "short_name": "Egg Farm",
+  "description": "Sales, expense, and harvest tracker for the egg farm.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#E7EBDA",
+  "theme_color": "#47301F",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
