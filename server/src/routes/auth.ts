@@ -37,7 +37,11 @@ authRouter.post(
 );
 
 authRouter.post("/logout", (req, res) => {
-  res.clearCookie(AUTH_COOKIE, authCookieOptions(req.secure));
+  // clearCookie only needs the attributes that scope which cookie it's
+  // clearing (path/secure/sameSite) — Express 5 deprecates passing maxAge
+  // here since it now always expires the cookie immediately regardless.
+  const { maxAge: _maxAge, ...clearOptions } = authCookieOptions(req.secure);
+  res.clearCookie(AUTH_COOKIE, clearOptions);
   res.status(204).send();
 });
 
