@@ -1,0 +1,2 @@
+ALTER TABLE "sales" DROP CONSTRAINT "sales_egg_size_check";--> statement-breakpoint
+ALTER TABLE "sales" ADD CONSTRAINT "sales_egg_size_check" CHECK ("sales"."egg_size" in ('Extra Small','Small','Medium','Large','Extra Large','Jumbo','Reject'));

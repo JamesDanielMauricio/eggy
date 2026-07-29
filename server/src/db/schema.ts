@@ -13,7 +13,7 @@ import {
 // Kept in sync with the CHECK constraints below by hand — the constraint
 // enforces this list at the database level, this array lets the API
 // validate the same list before an insert is even attempted.
-export const EGG_SIZES = ["Extra Small", "Small", "Medium", "Large", "Extra Large"] as const;
+export const EGG_SIZES = ["Extra Small", "Small", "Medium", "Large", "Extra Large", "Jumbo", "Reject"] as const;
 export const EXPENSE_ITEMS = ["Feeds", "Fly Trap", "Medicines/Vitamins", "Others"] as const;
 
 export const users = pgTable("users", {
@@ -36,7 +36,7 @@ export const sales = pgTable(
   (table) => [
     check(
       "sales_egg_size_check",
-      sql`${table.eggSize} in ('Extra Small','Small','Medium','Large','Extra Large')`
+      sql`${table.eggSize} in ('Extra Small','Small','Medium','Large','Extra Large','Jumbo','Reject')`
     ),
     check("sales_quantity_check", sql`${table.quantity} > 0`),
     check("sales_price_per_egg_check", sql`${table.pricePerEgg} >= 0`),

@@ -18,6 +18,8 @@ const EGG_BASE_PRICE: Record<(typeof EGG_SIZES)[number], number> = {
   "Medium": 7.5,
   "Large": 8.75,
   "Extra Large": 10,
+  "Jumbo": 12,
+  "Reject": 2,
 };
 
 const EXPENSE_BASE_PRICE: Record<(typeof EXPENSE_ITEMS)[number], number> = {

@@ -10,7 +10,7 @@ import {
 import * as api from './lib/api';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle } from './lib/theme';
 
-const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large'];
+const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large', 'Jumbo', 'Reject'];
 const EXPENSE_ITEMS = ['Feeds', 'Fly Trap', 'Medicines/Vitamins', 'Others'];
 const CURRENCY = '₱';
 
@@ -20,6 +20,8 @@ const EGG_SIZE_COLORS = {
   'Medium': '#E5A62E',
   'Large': '#B97D28',
   'Extra Large': '#7A4F1E',
+  'Jumbo': '#4F2F13',
+  'Reject': '#8B8577',
 };
 
 const EXPENSE_COLORS = {
@@ -350,10 +352,44 @@ function DashboardView({
   );
 }
 
+function PriceModeToggle({ value, onChange, perUnitLabel, totalLabel }) {
+  const options = [
+    { id: 'perUnit', label: perUnitLabel },
+    { id: 'total', label: totalLabel },
+  ];
+  return (
+    <div className="flex rounded-lg p-0.5" style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.cardBorder}` }}>
+      {options.map((o) => {
+        const active = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onChange(o.id)}
+            className="flex-1 py-1.5 text-xs font-medium rounded-md transition-colors"
+            style={{
+              backgroundColor: active ? COLORS.barnwood : 'transparent',
+              color: active ? '#FFFFFF' : COLORS.inkSoft,
+              fontFamily: FONT_BODY,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function AddSaleForm({ onSubmit }) {
   const [eggSize, setEggSize] = useState('Medium');
   const [quantity, setQuantity] = useState('');
   const [date, setDate] = useState(getTodayLocal());
+  // 'perUnit': the price field holds price for one egg (the old behavior).
+  // 'total': the price field holds what the whole sale sold for, and we
+  // divide by quantity below to get the per-egg price the API stores —
+  // saves the user from doing that division by hand.
+  const [priceMode, setPriceMode] = useState('perUnit');
   const [price, setPrice] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -364,14 +400,28 @@ function AddSaleForm({ onSubmit }) {
     return () => clearTimeout(t);
   }, [success]);
 
+  const q = Number(quantity);
+  const p = Number(price);
+  const hasPreview = quantity && q > 0 && price && p > 0;
+  const previewText = priceMode === 'total'
+    ? `= ${formatCurrency(p / q)} per egg`
+    : `= ${formatCurrency(p * q)} total`;
+
+  function handlePriceModeChange(mode) {
+    // The number typed under one mode means something totally different in
+    // the other (₱10/egg vs ₱10 total), so carrying it over would silently
+    // record the wrong sale — clearing it forces a deliberate re-entry.
+    setPriceMode(mode);
+    setPrice('');
+  }
+
   function handleSubmit(e) {
     e.preventDefault();
-    const q = Number(quantity);
-    const p = Number(price);
     if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
     if (!price || p <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ eggSize, quantity: q, date, pricePerEgg: p });
+    const pricePerEgg = priceMode === 'total' ? p / q : p;
+    onSubmit({ eggSize, quantity: q, date, pricePerEgg });
     setFormError('');
     setQuantity('');
     setPrice('');
@@ -392,11 +442,27 @@ function AddSaleForm({ onSubmit }) {
         <Field label="Quantity (eggs)">
           <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 30" className={inputClasses} style={inputStyle} />
         </Field>
-        <Field label="Price per egg">
+        <div>
+          <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>How are you entering the price?</span>
+          <PriceModeToggle value={priceMode} onChange={handlePriceModeChange} perUnitLabel="Per egg" totalLabel="Total sale" />
+        </div>
+        <Field label={priceMode === 'total' ? 'Total price for this sale' : 'Price per egg'}>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-            <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" className={`${inputClasses} pl-7`} style={inputStyle} />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder={priceMode === 'total' ? 'e.g. 1000' : '0.00'}
+              className={`${inputClasses} pl-7`}
+              style={inputStyle}
+            />
           </div>
+          {hasPreview && (
+            <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{previewText}</p>
+          )}
         </Field>
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
@@ -419,6 +485,9 @@ function AddExpenseForm({ onSubmit }) {
   const [item, setItem] = useState('Feeds');
   const [quantity, setQuantity] = useState('');
   const [date, setDate] = useState(getTodayLocal());
+  // Same idea as AddSaleForm: 'total' lets the user type what the whole
+  // purchase cost instead of doing the per-item division themselves.
+  const [priceMode, setPriceMode] = useState('perUnit');
   const [price, setPrice] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -429,14 +498,25 @@ function AddExpenseForm({ onSubmit }) {
     return () => clearTimeout(t);
   }, [success]);
 
+  const q = Number(quantity);
+  const p = Number(price);
+  const hasPreview = quantity && q > 0 && price && p > 0;
+  const previewText = priceMode === 'total'
+    ? `= ${formatCurrency(p / q)} per item`
+    : `= ${formatCurrency(p * q)} total`;
+
+  function handlePriceModeChange(mode) {
+    setPriceMode(mode);
+    setPrice('');
+  }
+
   function handleSubmit(e) {
     e.preventDefault();
-    const q = Number(quantity);
-    const p = Number(price);
     if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
     if (!price || p <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ item, quantity: q, date, price: p });
+    const pricePerItem = priceMode === 'total' ? p / q : p;
+    onSubmit({ item, quantity: q, date, price: pricePerItem });
     setFormError('');
     setQuantity('');
     setPrice('');
@@ -457,11 +537,27 @@ function AddExpenseForm({ onSubmit }) {
         <Field label="Quantity">
           <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
         </Field>
-        <Field label="Price per item">
+        <div>
+          <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>How are you entering the price?</span>
+          <PriceModeToggle value={priceMode} onChange={handlePriceModeChange} perUnitLabel="Per item" totalLabel="Total cost" />
+        </div>
+        <Field label={priceMode === 'total' ? 'Total cost for this expense' : 'Price per item'}>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-            <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" className={`${inputClasses} pl-7`} style={inputStyle} />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder={priceMode === 'total' ? 'e.g. 500' : '0.00'}
+              className={`${inputClasses} pl-7`}
+              style={inputStyle}
+            />
           </div>
+          {hasPreview && (
+            <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{previewText}</p>
+          )}
         </Field>
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
