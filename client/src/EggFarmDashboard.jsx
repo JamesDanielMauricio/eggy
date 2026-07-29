@@ -6,6 +6,7 @@ import {
 import {
   DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
   LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff, LogOut,
+  CheckCircle2,
 } from 'lucide-react';
 import * as api from './lib/api';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle } from './lib/theme';
@@ -32,6 +33,17 @@ const EXPENSE_COLORS = {
 };
 
 const PERIOD_LIMITS = { daily: 30, weekly: 12, monthly: 12, yearly: 6 };
+const TRAY_SIZE = 30;
+
+// Blank fields default to 0 (a partial "3 trays, no loose pcs" entry is
+// normal), but a genuinely invalid number (negative, non-integer) returns
+// null so the caller can reject it instead of silently treating it as 0.
+function trayPcsToTotal(trays, pcs) {
+  const t = trays === '' ? 0 : Number(trays);
+  const p = pcs === '' ? 0 : Number(pcs);
+  if (!Number.isInteger(t) || t < 0 || !Number.isInteger(p) || p < 0) return null;
+  return t * TRAY_SIZE + p;
+}
 
 function parseDateLocal(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -119,6 +131,47 @@ function Field({ label, children }) {
       <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+// Lets a count be entered as whole trays + loose pcs instead of one number
+// the user has to multiply out by hand first (e.g. "3 trays and 10 pcs"
+// instead of pre-computing 3*30+10=100).
+function TrayPcsField({ label, trays, pcs, onTraysChange, onPcsChange, unitLabel = 'eggs' }) {
+  const total = trayPcsToTotal(trays, pcs);
+  const hasValue = trays !== '' || pcs !== '';
+  return (
+    <Field label={label}>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <input
+            type="number" min="0" step="1"
+            value={trays}
+            onChange={(e) => onTraysChange(e.target.value)}
+            placeholder="0"
+            className={inputClasses}
+            style={inputStyle}
+          />
+          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Trays (× {TRAY_SIZE})</span>
+        </div>
+        <div>
+          <input
+            type="number" min="0" step="1"
+            value={pcs}
+            onChange={(e) => onPcsChange(e.target.value)}
+            placeholder="0"
+            className={inputClasses}
+            style={inputStyle}
+          />
+          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Pcs</span>
+        </div>
+      </div>
+      {hasValue && (
+        <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
+          {total === null ? 'Enter whole numbers, 0 or more.' : `= ${total.toLocaleString()} ${unitLabel}`}
+        </p>
+      )}
+    </Field>
   );
 }
 
@@ -352,45 +405,57 @@ function DashboardView({
   );
 }
 
-function PriceModeToggle({ value, onChange, perUnitLabel, totalLabel }) {
-  const options = [
-    { id: 'perUnit', label: perUnitLabel },
-    { id: 'total', label: totalLabel },
-  ];
+// Two price inputs that stay in sync with each other via the quantity:
+// typing a per-unit price fills in the total, typing a total fills in the
+// per-unit price — whichever one the user didn't type into is derived, so
+// they never have to do that division/multiplication by hand.
+function TwoWayPriceField({ label, quantity, perUnit, total, onPerUnitChange, onTotalChange, perUnitCaption, totalCaption }) {
   return (
-    <div className="flex rounded-lg p-0.5" style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.cardBorder}` }}>
-      {options.map((o) => {
-        const active = value === o.id;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => onChange(o.id)}
-            className="flex-1 py-1.5 text-xs font-medium rounded-md transition-colors"
-            style={{
-              backgroundColor: active ? COLORS.barnwood : 'transparent',
-              color: active ? '#FFFFFF' : COLORS.inkSoft,
-              fontFamily: FONT_BODY,
-            }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+    <Field label={label}>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
+            <input
+              type="number" min="0" step="0.01"
+              value={perUnit}
+              onChange={(e) => onPerUnitChange(e.target.value)}
+              placeholder="0.00"
+              className={`${inputClasses} pl-7`}
+              style={inputStyle}
+            />
+          </div>
+          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{perUnitCaption}</span>
+        </div>
+        <div>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
+            <input
+              type="number" min="0" step="0.01"
+              value={total}
+              onChange={(e) => onTotalChange(e.target.value)}
+              placeholder="0.00"
+              className={`${inputClasses} pl-7`}
+              style={inputStyle}
+            />
+          </div>
+          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{totalCaption}</span>
+        </div>
+      </div>
+      {quantity <= 0 && (
+        <p className="text-xs mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Enter a quantity above to auto-fill the other price.</p>
+      )}
+    </Field>
   );
 }
 
 function AddSaleForm({ onSubmit }) {
   const [eggSize, setEggSize] = useState('Medium');
-  const [quantity, setQuantity] = useState('');
+  const [trays, setTrays] = useState('');
+  const [pcs, setPcs] = useState('');
   const [date, setDate] = useState(getTodayLocal());
-  // 'perUnit': the price field holds price for one egg (the old behavior).
-  // 'total': the price field holds what the whole sale sold for, and we
-  // divide by quantity below to get the per-egg price the API stores —
-  // saves the user from doing that division by hand.
-  const [priceMode, setPriceMode] = useState('perUnit');
-  const [price, setPrice] = useState('');
+  const [perUnitPrice, setPerUnitPrice] = useState('');
+  const [totalPrice, setTotalPrice] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -400,31 +465,39 @@ function AddSaleForm({ onSubmit }) {
     return () => clearTimeout(t);
   }, [success]);
 
-  const q = Number(quantity);
-  const p = Number(price);
-  const hasPreview = quantity && q > 0 && price && p > 0;
-  const previewText = priceMode === 'total'
-    ? `= ${formatCurrency(p / q)} per egg`
-    : `= ${formatCurrency(p * q)} total`;
+  const q = trayPcsToTotal(trays, pcs) ?? 0;
 
-  function handlePriceModeChange(mode) {
-    // The number typed under one mode means something totally different in
-    // the other (₱10/egg vs ₱10 total), so carrying it over would silently
-    // record the wrong sale — clearing it forces a deliberate re-entry.
-    setPriceMode(mode);
-    setPrice('');
+  function handlePerUnitChange(value) {
+    setPerUnitPrice(value);
+    if (value === '') { setTotalPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setTotalPrice((num * q).toFixed(2));
+    }
+  }
+
+  function handleTotalChange(value) {
+    setTotalPrice(value);
+    if (value === '') { setPerUnitPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setPerUnitPrice((num / q).toFixed(2));
+    }
   }
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
-    if (!price || p <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    const quantity = trayPcsToTotal(trays, pcs);
+    if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
+    const pricePerEgg = Number(perUnitPrice);
+    if (!perUnitPrice || pricePerEgg <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    const pricePerEgg = priceMode === 'total' ? p / q : p;
-    onSubmit({ eggSize, quantity: q, date, pricePerEgg });
+    onSubmit({ eggSize, quantity, date, pricePerEgg });
     setFormError('');
-    setQuantity('');
-    setPrice('');
+    setTrays('');
+    setPcs('');
+    setPerUnitPrice('');
+    setTotalPrice('');
     setSuccess(true);
   }
 
@@ -439,36 +512,27 @@ function AddSaleForm({ onSubmit }) {
             {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Field>
-        <Field label="Quantity (eggs)">
-          <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 30" className={inputClasses} style={inputStyle} />
-        </Field>
-        <div>
-          <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>How are you entering the price?</span>
-          <PriceModeToggle value={priceMode} onChange={handlePriceModeChange} perUnitLabel="Per egg" totalLabel="Total sale" />
-        </div>
-        <Field label={priceMode === 'total' ? 'Total price for this sale' : 'Price per egg'}>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder={priceMode === 'total' ? 'e.g. 1000' : '0.00'}
-              className={`${inputClasses} pl-7`}
-              style={inputStyle}
-            />
-          </div>
-          {hasPreview && (
-            <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{previewText}</p>
-          )}
-        </Field>
+        <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
+        <TwoWayPriceField
+          label="Price"
+          quantity={q}
+          perUnit={perUnitPrice}
+          total={totalPrice}
+          onPerUnitChange={handlePerUnitChange}
+          onTotalChange={handleTotalChange}
+          perUnitCaption="Per egg"
+          totalCaption="Total sale"
+        />
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
         </Field>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        {success && <p className="text-sm" style={{ color: COLORS.moss }}>Sale recorded.</p>}
+        {success && (
+          <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
+            <CheckCircle2 size={16} />
+            <p className="text-sm font-medium">Sale recorded.</p>
+          </div>
+        )}
         <button
           type="submit"
           className="w-full font-semibold py-2.5 rounded-lg transition-colors"
@@ -485,10 +549,8 @@ function AddExpenseForm({ onSubmit }) {
   const [item, setItem] = useState('Feeds');
   const [quantity, setQuantity] = useState('');
   const [date, setDate] = useState(getTodayLocal());
-  // Same idea as AddSaleForm: 'total' lets the user type what the whole
-  // purchase cost instead of doing the per-item division themselves.
-  const [priceMode, setPriceMode] = useState('perUnit');
-  const [price, setPrice] = useState('');
+  const [perUnitPrice, setPerUnitPrice] = useState('');
+  const [totalPrice, setTotalPrice] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -498,28 +560,37 @@ function AddExpenseForm({ onSubmit }) {
     return () => clearTimeout(t);
   }, [success]);
 
-  const q = Number(quantity);
-  const p = Number(price);
-  const hasPreview = quantity && q > 0 && price && p > 0;
-  const previewText = priceMode === 'total'
-    ? `= ${formatCurrency(p / q)} per item`
-    : `= ${formatCurrency(p * q)} total`;
+  const q = Number(quantity) || 0;
 
-  function handlePriceModeChange(mode) {
-    setPriceMode(mode);
-    setPrice('');
+  function handlePerUnitChange(value) {
+    setPerUnitPrice(value);
+    if (value === '') { setTotalPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setTotalPrice((num * q).toFixed(2));
+    }
+  }
+
+  function handleTotalChange(value) {
+    setTotalPrice(value);
+    if (value === '') { setPerUnitPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setPerUnitPrice((num / q).toFixed(2));
+    }
   }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
-    if (!price || p <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    const pricePerItem = Number(perUnitPrice);
+    if (!perUnitPrice || pricePerItem <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    const pricePerItem = priceMode === 'total' ? p / q : p;
     onSubmit({ item, quantity: q, date, price: pricePerItem });
     setFormError('');
     setQuantity('');
-    setPrice('');
+    setPerUnitPrice('');
+    setTotalPrice('');
     setSuccess(true);
   }
 
@@ -537,33 +608,26 @@ function AddExpenseForm({ onSubmit }) {
         <Field label="Quantity">
           <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
         </Field>
-        <div>
-          <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>How are you entering the price?</span>
-          <PriceModeToggle value={priceMode} onChange={handlePriceModeChange} perUnitLabel="Per item" totalLabel="Total cost" />
-        </div>
-        <Field label={priceMode === 'total' ? 'Total cost for this expense' : 'Price per item'}>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder={priceMode === 'total' ? 'e.g. 500' : '0.00'}
-              className={`${inputClasses} pl-7`}
-              style={inputStyle}
-            />
-          </div>
-          {hasPreview && (
-            <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{previewText}</p>
-          )}
-        </Field>
+        <TwoWayPriceField
+          label="Price"
+          quantity={q}
+          perUnit={perUnitPrice}
+          total={totalPrice}
+          onPerUnitChange={handlePerUnitChange}
+          onTotalChange={handleTotalChange}
+          perUnitCaption="Per item"
+          totalCaption="Total cost"
+        />
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
         </Field>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        {success && <p className="text-sm" style={{ color: COLORS.moss }}>Expense recorded.</p>}
+        {success && (
+          <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
+            <CheckCircle2 size={16} />
+            <p className="text-sm font-medium">Expense recorded.</p>
+          </div>
+        )}
         <button
           type="submit"
           className="w-full font-semibold py-2.5 rounded-lg transition-colors"
@@ -577,8 +641,10 @@ function AddExpenseForm({ onSubmit }) {
 }
 
 function AddHarvestForm({ onSubmit }) {
-  const [harvested, setHarvested] = useState('');
-  const [rejected, setRejected] = useState('');
+  const [harvestedTrays, setHarvestedTrays] = useState('');
+  const [harvestedPcs, setHarvestedPcs] = useState('');
+  const [rejectedTrays, setRejectedTrays] = useState('');
+  const [rejectedPcs, setRejectedPcs] = useState('');
   const [date, setDate] = useState(getTodayLocal());
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -591,16 +657,18 @@ function AddHarvestForm({ onSubmit }) {
 
   function handleSubmit(e) {
     e.preventDefault();
-    const h = Number(harvested);
-    const r = Number(rejected);
-    if (harvested === '' || !Number.isInteger(h) || h < 0) { setFormError('Enter a valid number of harvested eggs (0 or more).'); return; }
-    if (rejected === '' || !Number.isInteger(r) || r < 0) { setFormError('Enter a valid number of rejected eggs (0 or more).'); return; }
+    const h = trayPcsToTotal(harvestedTrays, harvestedPcs);
+    const r = trayPcsToTotal(rejectedTrays, rejectedPcs);
+    if (h === null) { setFormError('Enter a valid number of trays/pcs harvested (0 or more).'); return; }
+    if (r === null) { setFormError('Enter a valid number of trays/pcs rejected (0 or more).'); return; }
     if (r > h) { setFormError('Rejected eggs cannot exceed harvested eggs.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
     onSubmit({ harvested: h, rejected: r, date });
     setFormError('');
-    setHarvested('');
-    setRejected('');
+    setHarvestedTrays('');
+    setHarvestedPcs('');
+    setRejectedTrays('');
+    setRejectedPcs('');
     setSuccess(true);
   }
 
@@ -610,17 +678,18 @@ function AddHarvestForm({ onSubmit }) {
         <Egg size={16} style={{ color: COLORS.yolk }} /> Record a Harvest
       </h2>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="Eggs harvested">
-          <input type="number" min="0" step="1" value={harvested} onChange={(e) => setHarvested(e.target.value)} placeholder="e.g. 180" className={inputClasses} style={inputStyle} />
-        </Field>
-        <Field label="Eggs rejected">
-          <input type="number" min="0" step="1" value={rejected} onChange={(e) => setRejected(e.target.value)} placeholder="e.g. 5" className={inputClasses} style={inputStyle} />
-        </Field>
+        <TrayPcsField label="Eggs harvested" trays={harvestedTrays} pcs={harvestedPcs} onTraysChange={setHarvestedTrays} onPcsChange={setHarvestedPcs} unitLabel="eggs" />
+        <TrayPcsField label="Eggs rejected" trays={rejectedTrays} pcs={rejectedPcs} onTraysChange={setRejectedTrays} onPcsChange={setRejectedPcs} unitLabel="eggs" />
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
         </Field>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        {success && <p className="text-sm" style={{ color: COLORS.moss }}>Harvest recorded.</p>}
+        {success && (
+          <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
+            <CheckCircle2 size={16} />
+            <p className="text-sm font-medium">Harvest recorded.</p>
+          </div>
+        )}
         <button
           type="submit"
           className="w-full font-semibold py-2.5 rounded-lg transition-colors"
@@ -641,9 +710,21 @@ function EmptyRecords({ text }) {
   );
 }
 
-function RecordRow({ title, subtitle, amount, amountColor, confirming, onDeleteClick, onCancel }) {
+function RecordRow({ title, subtitle, amount, amountColor, confirming, removing, onDeleteClick, onCancel }) {
   return (
-    <div className="rounded-xl px-4 py-3 shadow-sm flex items-center justify-between gap-3" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div
+      className="rounded-xl px-4 py-3 shadow-sm flex items-center justify-between gap-3"
+      style={{
+        backgroundColor: COLORS.card,
+        border: `1px solid ${COLORS.cardBorder}`,
+        overflow: 'hidden',
+        transition: 'opacity 260ms ease, transform 260ms ease, max-height 260ms ease, margin-top 260ms ease, padding 260ms ease',
+        opacity: removing ? 0 : 1,
+        transform: removing ? 'scale(0.95)' : 'scale(1)',
+        maxHeight: removing ? 0 : 200,
+        ...(removing ? { marginTop: 0, paddingTop: 0, paddingBottom: 0 } : null),
+      }}
+    >
       <div className="min-w-0">
         <p className="font-medium text-sm truncate" style={{ color: COLORS.ink, fontFamily: FONT_BODY }}>{title}</p>
         <p className="text-xs truncate" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{subtitle}</p>
@@ -668,6 +749,7 @@ function RecordRow({ title, subtitle, amount, amountColor, confirming, onDeleteC
 function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest }) {
   const [subTab, setSubTab] = useState('sales');
   const [confirmId, setConfirmId] = useState(null);
+  const [removingId, setRemovingId] = useState(null);
 
   const sortedSales = useMemo(() => [...sales].sort((a, b) => b.date.localeCompare(a.date)), [sales]);
   const sortedExpenses = useMemo(() => [...expenses].sort((a, b) => b.date.localeCompare(a.date)), [expenses]);
@@ -675,10 +757,18 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
 
   function handleDeleteClick(id) {
     if (confirmId === id) {
-      if (subTab === 'sales') onDeleteSale(id);
-      else if (subTab === 'expenses') onDeleteExpense(id);
-      else onDeleteHarvest(id);
       setConfirmId(null);
+      // Play the collapse animation first, then actually remove the row —
+      // deleting immediately would yank it out from under the animation
+      // (the array update unmounts it mid-transition instead of finishing).
+      setRemovingId(id);
+      const tab = subTab;
+      setTimeout(() => {
+        if (tab === 'sales') onDeleteSale(id);
+        else if (tab === 'expenses') onDeleteExpense(id);
+        else onDeleteHarvest(id);
+        setRemovingId(null);
+      }, 260);
     } else {
       setConfirmId(id);
     }
@@ -726,6 +816,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
                 amount={formatCurrency(s.quantity * s.pricePerEgg)}
                 amountColor={COLORS.moss}
                 confirming={confirmId === s.id}
+                removing={removingId === s.id}
                 onDeleteClick={() => handleDeleteClick(s.id)}
                 onCancel={() => setConfirmId(null)}
               />
@@ -747,6 +838,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
                 amount={formatCurrency(e.quantity * e.price)}
                 amountColor={COLORS.brick}
                 confirming={confirmId === e.id}
+                removing={removingId === e.id}
                 onDeleteClick={() => handleDeleteClick(e.id)}
                 onCancel={() => setConfirmId(null)}
               />
@@ -768,6 +860,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
                 amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
                 amountColor={COLORS.moss}
                 confirming={confirmId === h.id}
+                removing={removingId === h.id}
                 onDeleteClick={() => handleDeleteClick(h.id)}
                 onCancel={() => setConfirmId(null)}
               />

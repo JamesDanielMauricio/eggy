@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+/* Confirmation pop for a successful add — re-plays every time because the
+   success banner unmounts/remounts (conditionally rendered), not just once. */
+@keyframes eggy-pop-in {
+  0% { opacity: 0; transform: scale(0.85) translateY(4px); }
+  60% { opacity: 1; transform: scale(1.04) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.eggy-anim-pop-in {
+  animation: eggy-pop-in 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
