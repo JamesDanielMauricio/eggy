@@ -23,6 +23,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // The HTML shell is the one unhashed URL that points at every other
+  // (hashed) asset. Vite gives JS/CSS a new filename on every build, so
+  // caching those forever is safe — but caching THIS cache-first meant a
+  // browser's first visit pinned it to that build's index.html forever,
+  // silently hiding every deploy after it. Network-first here, falling
+  // back to cache only when truly offline, fixes that while keeping the
+  // hashed assets cache-first below.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
