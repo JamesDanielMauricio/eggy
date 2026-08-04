@@ -6,7 +6,6 @@ if (!process.env.JWT_SECRET) {
 }
 const JWT_SECRET = process.env.JWT_SECRET;
 
-const TOKEN_TTL = "7d";
 export const AUTH_COOKIE = "token";
 
 export function hashPassword(plain: string): Promise<string> {
@@ -19,8 +18,14 @@ export function verifyPassword(plain: string, hash: string): Promise<boolean> {
 
 export type AuthPayload = { userId: string; username: string };
 
+// No `expiresIn` — the token carries no `exp` claim, so verifyToken() below
+// never rejects it for being "too old". This is a stateless JWT with no
+// server-side session table, so there's also no way to revoke a token early
+// (e.g. after a lost device) short of rotating JWT_SECRET, which logs
+// everyone out at once. Acceptable here since this is a small private app
+// with a handful of trusted admin users, not a public multi-user service.
 export function signToken(payload: AuthPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_TTL });
+  return jwt.sign(payload, JWT_SECRET);
 }
 
 export function verifyToken(token: string): AuthPayload | null {
@@ -44,7 +49,13 @@ export function authCookieOptions(secure: boolean) {
     httpOnly: true,
     secure,
     sameSite: secure ? ("none" as const) : ("lax" as const),
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    // Chrome (and, following its lead, other Chromium browsers) hard-caps
+    // any cookie's lifetime at 400 days from when it's set, no matter what
+    // maxAge the server sends — there's no way to make a cookie truly last
+    // forever. This sets it to that ceiling so the login survives as long
+    // as the platform allows; after ~400 days of no new login, the browser
+    // drops the cookie itself and the user has to sign in again.
+    maxAge: 400 * 24 * 60 * 60 * 1000,
     path: "/",
   };
 }
