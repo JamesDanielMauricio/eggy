@@ -40,17 +40,17 @@ export async function getCurrentUser() {
 // The API returns Drizzle's column names (saleDate, numeric fields as
 // strings); the component works with `date` and plain JS numbers.
 function fromSaleRow(row) {
-  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg) };
+  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), createdAt: row.createdAt };
 }
 
 function fromExpenseRow(row) {
-  return { id: row.id, item: row.item, quantity: row.quantity, date: row.expenseDate, price: Number(row.price) };
+  return { id: row.id, item: row.item, quantity: row.quantity, date: row.expenseDate, price: Number(row.price), createdAt: row.createdAt };
 }
 
 // harvested/rejected are integer columns, so unlike price/pricePerEgg they
 // already come back as JS numbers — no string-to-number conversion needed.
 function fromHarvestRow(row) {
-  return { id: row.id, harvested: row.harvested, rejected: row.rejected, date: row.harvestDate };
+  return { id: row.id, harvested: row.harvested, rejected: row.rejected, date: row.harvestDate, createdAt: row.createdAt };
 }
 
 export async function listSales() {

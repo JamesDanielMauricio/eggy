@@ -751,9 +751,12 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
 
-  const sortedSales = useMemo(() => [...sales].sort((a, b) => b.date.localeCompare(a.date)), [sales]);
-  const sortedExpenses = useMemo(() => [...expenses].sort((a, b) => b.date.localeCompare(a.date)), [expenses]);
-  const sortedHarvests = useMemo(() => [...harvests].sort((a, b) => b.date.localeCompare(a.date)), [harvests]);
+  // Most-recently-added first — not the sale/expense/harvest date, which is
+  // user-entered and can be backdated, so it doesn't reflect entry order.
+  const byRecentlyAdded = (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
+  const sortedSales = useMemo(() => [...sales].sort(byRecentlyAdded), [sales]);
+  const sortedExpenses = useMemo(() => [...expenses].sort(byRecentlyAdded), [expenses]);
+  const sortedHarvests = useMemo(() => [...harvests].sort(byRecentlyAdded), [harvests]);
 
   function handleDeleteClick(id) {
     if (confirmId === id) {
@@ -963,7 +966,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
   // error, instead of leaving a record on screen that was never actually saved.
   const addSale = useCallback(async (entry) => {
     const tempId = crypto.randomUUID();
-    setSales((prev) => [...prev, { ...entry, id: tempId }]);
+    setSales((prev) => [...prev, { ...entry, id: tempId, createdAt: new Date().toISOString() }]);
     try {
       const sale = await api.createSale(entry);
       setSales((prev) => prev.map((s) => (s.id === tempId ? sale : s)));
@@ -985,7 +988,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
   // Same optimistic-then-reconcile approach as addSale above.
   const addExpense = useCallback(async (entry) => {
     const tempId = crypto.randomUUID();
-    setExpenses((prev) => [...prev, { ...entry, id: tempId }]);
+    setExpenses((prev) => [...prev, { ...entry, id: tempId, createdAt: new Date().toISOString() }]);
     try {
       const expense = await api.createExpense(entry);
       setExpenses((prev) => prev.map((x) => (x.id === tempId ? expense : x)));
@@ -1007,7 +1010,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
   // Same optimistic-then-reconcile approach as addSale above.
   const addHarvest = useCallback(async (entry) => {
     const tempId = crypto.randomUUID();
-    setHarvests((prev) => [...prev, { ...entry, id: tempId }]);
+    setHarvests((prev) => [...prev, { ...entry, id: tempId, createdAt: new Date().toISOString() }]);
     try {
       const harvest = await api.createHarvest(entry);
       setHarvests((prev) => prev.map((x) => (x.id === tempId ? harvest : x)));
