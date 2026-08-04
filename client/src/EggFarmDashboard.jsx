@@ -957,11 +957,18 @@ export default function EggFarmDashboard({ username, onLogout }) {
     return () => { mounted = false; };
   }, []);
 
+  // Optimistic: show the sale immediately under a temporary id rather than
+  // waiting for the round trip. On success we swap in the server's row (real
+  // id, so delete works); on failure we remove the temp entry and surface an
+  // error, instead of leaving a record on screen that was never actually saved.
   const addSale = useCallback(async (entry) => {
+    const tempId = crypto.randomUUID();
+    setSales((prev) => [...prev, { ...entry, id: tempId }]);
     try {
       const sale = await api.createSale(entry);
-      setSales((prev) => [...prev, sale]);
+      setSales((prev) => prev.map((s) => (s.id === tempId ? sale : s)));
     } catch (e) {
+      setSales((prev) => prev.filter((s) => s.id !== tempId));
       setErrorMsg('Could not save your sale. Please try again.');
     }
   }, []);
@@ -975,11 +982,15 @@ export default function EggFarmDashboard({ username, onLogout }) {
     }
   }, []);
 
+  // Same optimistic-then-reconcile approach as addSale above.
   const addExpense = useCallback(async (entry) => {
+    const tempId = crypto.randomUUID();
+    setExpenses((prev) => [...prev, { ...entry, id: tempId }]);
     try {
       const expense = await api.createExpense(entry);
-      setExpenses((prev) => [...prev, expense]);
+      setExpenses((prev) => prev.map((x) => (x.id === tempId ? expense : x)));
     } catch (e) {
+      setExpenses((prev) => prev.filter((x) => x.id !== tempId));
       setErrorMsg('Could not save your expense. Please try again.');
     }
   }, []);
@@ -993,11 +1004,15 @@ export default function EggFarmDashboard({ username, onLogout }) {
     }
   }, []);
 
+  // Same optimistic-then-reconcile approach as addSale above.
   const addHarvest = useCallback(async (entry) => {
+    const tempId = crypto.randomUUID();
+    setHarvests((prev) => [...prev, { ...entry, id: tempId }]);
     try {
       const harvest = await api.createHarvest(entry);
-      setHarvests((prev) => [...prev, harvest]);
+      setHarvests((prev) => prev.map((x) => (x.id === tempId ? harvest : x)));
     } catch (e) {
+      setHarvests((prev) => prev.filter((x) => x.id !== tempId));
       setErrorMsg('Could not save your harvest. Please try again.');
     }
   }, []);
