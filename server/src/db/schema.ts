@@ -15,6 +15,7 @@ import {
 // validate the same list before an insert is even attempted.
 export const EGG_SIZES = ["Extra Small", "Small", "Medium", "Large", "Extra Large", "Jumbo", "Reject"] as const;
 export const EXPENSE_ITEMS = ["Feeds", "Fly Trap", "Medicines/Vitamins", "Others"] as const;
+export const SALE_STATUSES = ["paid", "pending"] as const;
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -31,6 +32,10 @@ export const sales = pgTable(
     quantity: integer("quantity").notNull(),
     pricePerEgg: numeric("price_per_egg", { precision: 10, scale: 2 }).notNull(),
     saleDate: date("sale_date").notNull(),
+    // "pending" = eggs handed over but customer hasn't paid yet (utang).
+    // Defaults to "paid" so every existing row and any API caller that
+    // omits the field keeps behaving like a normal, already-settled sale.
+    status: text("status").notNull().default("paid"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [
@@ -40,6 +45,7 @@ export const sales = pgTable(
     ),
     check("sales_quantity_check", sql`${table.quantity} > 0`),
     check("sales_price_per_egg_check", sql`${table.pricePerEgg} >= 0`),
+    check("sales_status_check", sql`${table.status} in ('paid','pending')`),
   ]
 );
 

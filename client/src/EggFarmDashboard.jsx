@@ -456,6 +456,7 @@ function AddSaleForm({ onSubmit }) {
   const [date, setDate] = useState(getTodayLocal());
   const [perUnitPrice, setPerUnitPrice] = useState('');
   const [totalPrice, setTotalPrice] = useState('');
+  const [isPending, setIsPending] = useState(false);
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -492,7 +493,7 @@ function AddSaleForm({ onSubmit }) {
     const pricePerEgg = Number(perUnitPrice);
     if (!perUnitPrice || pricePerEgg <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ eggSize, quantity, date, pricePerEgg });
+    onSubmit({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid' });
     setFormError('');
     setTrays('');
     setPcs('');
@@ -526,19 +527,31 @@ function AddSaleForm({ onSubmit }) {
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
         </Field>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isPending}
+            onChange={(e) => setIsPending(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded"
+            style={{ accentColor: COLORS.yolk }}
+          />
+          <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
+            Pending (utang) — customer took the eggs but hasn't paid yet
+          </span>
+        </label>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
         {success && (
           <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
             <CheckCircle2 size={16} />
-            <p className="text-sm font-medium">Sale recorded.</p>
+            <p className="text-sm font-medium">{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</p>
           </div>
         )}
         <button
           type="submit"
           className="w-full font-semibold py-2.5 rounded-lg transition-colors"
-          style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
+          style={{ backgroundColor: isPending ? COLORS.yolk : COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
         >
-          Add Sale
+          {isPending ? 'Add Pending Sale' : 'Add Sale'}
         </button>
       </form>
     </div>
@@ -710,7 +723,7 @@ function EmptyRecords({ text }) {
   );
 }
 
-function RecordRow({ title, subtitle, amount, amountColor, confirming, removing, onDeleteClick, onCancel }) {
+function RecordRow({ title, subtitle, amount, amountColor, badge, secondaryAction, confirming, removing, onDeleteClick, onCancel }) {
   return (
     <div
       className="rounded-xl px-4 py-3 shadow-sm flex items-center justify-between gap-3"
@@ -726,10 +739,14 @@ function RecordRow({ title, subtitle, amount, amountColor, confirming, removing,
       }}
     >
       <div className="min-w-0">
-        <p className="font-medium text-sm truncate" style={{ color: COLORS.ink, fontFamily: FONT_BODY }}>{title}</p>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <p className="font-medium text-sm truncate" style={{ color: COLORS.ink, fontFamily: FONT_BODY }}>{title}</p>
+          {badge}
+        </div>
         <p className="text-xs truncate" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{subtitle}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
+        {!confirming && secondaryAction}
         <span className="font-semibold text-sm" style={{ color: amountColor, fontFamily: FONT_DISPLAY }}>{amount}</span>
         {confirming ? (
           <div className="flex items-center gap-1">
@@ -746,7 +763,7 @@ function RecordRow({ title, subtitle, amount, amountColor, confirming, removing,
   );
 }
 
-function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest }) {
+function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest, onUpdateSaleStatus }) {
   const [subTab, setSubTab] = useState('sales');
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
@@ -817,7 +834,25 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
                 title={`${s.eggSize} · ${s.quantity} eggs`}
                 subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
                 amount={formatCurrency(s.quantity * s.pricePerEgg)}
-                amountColor={COLORS.moss}
+                amountColor={s.status === 'pending' ? COLORS.muted : COLORS.moss}
+                badge={s.status === 'pending' && (
+                  <span
+                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
+                    style={{ backgroundColor: COLORS.yolk, color: '#FFF', fontFamily: FONT_BODY }}
+                  >
+                    PENDING
+                  </span>
+                )}
+                secondaryAction={
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSaleStatus(s.id, s.status === 'pending' ? 'paid' : 'pending')}
+                    className="text-xs px-2 py-1 rounded-md font-medium whitespace-nowrap"
+                    style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+                  >
+                    {s.status === 'pending' ? 'Mark Paid' : 'Mark Pending'}
+                  </button>
+                }
                 confirming={confirmId === s.id}
                 removing={removingId === s.id}
                 onDeleteClick={() => handleDeleteClick(s.id)}
@@ -985,6 +1020,26 @@ export default function EggFarmDashboard({ username, onLogout }) {
     }
   }, []);
 
+  // Optimistic like addSale above: flip the status in place immediately (a
+  // paid/pending toggle is low-risk and instantly reversible by tapping
+  // again), then reconcile with the server. On failure, revert to whatever
+  // status this sale had before the tap rather than guessing the opposite.
+  const updateSaleStatus = useCallback(async (id, status) => {
+    let previousStatus;
+    setSales((prev) => prev.map((s) => {
+      if (s.id !== id) return s;
+      previousStatus = s.status;
+      return { ...s, status };
+    }));
+    try {
+      const sale = await api.updateSaleStatus(id, status);
+      setSales((prev) => prev.map((s) => (s.id === id ? sale : s)));
+    } catch (e) {
+      setSales((prev) => prev.map((s) => (s.id === id ? { ...s, status: previousStatus } : s)));
+      setErrorMsg('Could not update this sale. Please try again.');
+    }
+  }, []);
+
   // Same optimistic-then-reconcile approach as addSale above.
   const addExpense = useCallback(async (entry) => {
     const tempId = crypto.randomUUID();
@@ -1029,16 +1084,21 @@ export default function EggFarmDashboard({ username, onLogout }) {
     }
   }, []);
 
-  const totalRevenue = useMemo(() => sales.reduce((s, x) => s + x.quantity * x.pricePerEgg, 0), [sales]);
+  // Pending (utang) sales aren't real revenue yet — exclude them from every
+  // stat/chart below so the dashboard only reflects money actually received.
+  // They still appear in the Records list so they can be tracked and paid.
+  const paidSales = useMemo(() => sales.filter((s) => s.status !== 'pending'), [sales]);
+
+  const totalRevenue = useMemo(() => paidSales.reduce((s, x) => s + x.quantity * x.pricePerEgg, 0), [paidSales]);
   const totalExpenses = useMemo(() => expenses.reduce((s, x) => s + x.quantity * x.price, 0), [expenses]);
-  const totalEggs = useMemo(() => sales.reduce((s, x) => s + x.quantity, 0), [sales]);
+  const totalEggs = useMemo(() => paidSales.reduce((s, x) => s + x.quantity, 0), [paidSales]);
   const avgPricePerEgg = totalEggs ? totalRevenue / totalEggs : 0;
   const netProfit = totalRevenue - totalExpenses;
 
-  const chartData = useMemo(() => aggregateByPeriod(sales, expenses, granularity), [sales, expenses, granularity]);
+  const chartData = useMemo(() => aggregateByPeriod(paidSales, expenses, granularity), [paidSales, expenses, granularity]);
   const avgRevenuePerPeriod = chartData.length ? chartData.reduce((s, d) => s + d.revenue, 0) / chartData.length : 0;
 
-  const sizeBreakdown = useMemo(() => aggregateBy(sales, (s) => s.eggSize, (s) => s.quantity), [sales]);
+  const sizeBreakdown = useMemo(() => aggregateBy(paidSales, (s) => s.eggSize, (s) => s.quantity), [paidSales]);
   const expenseBreakdown = useMemo(() => aggregateBy(expenses, (e) => e.item, (e) => e.quantity * e.price), [expenses]);
 
   // Average per harvest record entered (in practice usually one per day) —
@@ -1093,6 +1153,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
             onDeleteSale={deleteSale}
             onDeleteExpense={deleteExpense}
             onDeleteHarvest={deleteHarvest}
+            onUpdateSaleStatus={updateSaleStatus}
           />
         )}
       </main>

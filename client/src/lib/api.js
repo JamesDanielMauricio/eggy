@@ -40,7 +40,7 @@ export async function getCurrentUser() {
 // The API returns Drizzle's column names (saleDate, numeric fields as
 // strings); the component works with `date` and plain JS numbers.
 function fromSaleRow(row) {
-  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), createdAt: row.createdAt };
+  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), status: row.status, createdAt: row.createdAt };
 }
 
 function fromExpenseRow(row) {
@@ -58,10 +58,18 @@ export async function listSales() {
   return rows.map(fromSaleRow);
 }
 
-export async function createSale({ eggSize, quantity, pricePerEgg, date }) {
+export async function createSale({ eggSize, quantity, pricePerEgg, date, status }) {
   const row = await request('/api/sales', {
     method: 'POST',
-    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date }),
+    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date, status }),
+  });
+  return fromSaleRow(row);
+}
+
+export async function updateSaleStatus(id, status) {
+  const row = await request(`/api/sales/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
   });
   return fromSaleRow(row);
 }
