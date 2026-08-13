@@ -36,14 +36,13 @@ export function verifyToken(token: string): AuthPayload | null {
   }
 }
 
-// The client (Vercel) and API (Render) live on different domains in
-// production, so the browser treats this as a cross-site request — that
-// requires SameSite=None + Secure or the browser silently drops the
-// cookie. Locally, client and server are both on localhost (different
-// ports only), which counts as same-site, so Lax works and Secure isn't
-// available anyway over plain http. `secure` is passed in per-request
-// (via req.secure) rather than a fixed env check so both cases work
-// without extra config.
+// In production the client and API are served from the same Vercel
+// deployment (same-site), but None + Secure works fine same-site too, so
+// there's no need to special-case it. Locally, client and server are both
+// on localhost (different ports only, plain http), where Secure isn't
+// available and None requires it — so Lax is used instead. `secure` is
+// passed in per-request (via req.secure) rather than a fixed env check so
+// both cases work without extra config.
 export function authCookieOptions(secure: boolean) {
   return {
     httpOnly: true,

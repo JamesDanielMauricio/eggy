@@ -64,3 +64,23 @@ Sales/expense tracker for an egg farm — Express + Drizzle ORM + Postgres backe
   [server/README.md](server/README.md) for schema-change workflow and the
   full script reference (`db:generate`, `db:migrate`, `db:studio`, etc).
 - `client/` — React dashboard. Reads the API base URL from `VITE_API_URL`.
+- `api/index.js` — thin entrypoint Vercel invokes per-request; re-exports
+  the compiled Express app from `server/dist` (see Deployment below).
+
+## Deployment
+
+Everything deploys as a single Vercel project — the built `client/` static
+files and the `server/` Express API (as one Vercel Function, via
+`api/index.js`) — wired together by the root `vercel.json`. There is no
+separate backend host.
+
+- **Root Directory**: leave blank/unset in the Vercel project settings so
+  it builds from the repo root, not `client/`.
+- **Environment variables** (Project Settings → Environment Variables):
+  `DATABASE_URL` and `JWT_SECRET`, same values as `server/.env`.
+  `CLIENT_ORIGIN` isn't needed in production (client and API share an
+  origin there) but is harmless to leave unset.
+- `vercel.json`'s `buildCommand` runs `tsc` for the server and `vite build`
+  for the client; `rewrites` sends every `/api/*` request to the one
+  function, and Express's own router handles the rest of the path from
+  there.

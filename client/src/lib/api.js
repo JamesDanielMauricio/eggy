@@ -6,10 +6,11 @@ const BASE_URL = import.meta.env.VITE_API_URL || '';
 async function request(path, options) {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    // The API and client live on different domains in production, so the
-    // login cookie only gets sent/accepted cross-origin if every request
-    // opts in with credentials: 'include' — without it every call looks
-    // logged-out even right after a successful login.
+    // In production the API and client share an origin, so the browser
+    // would send the cookie by default anyway — but in local dev they're
+    // on different ports (cross-origin), where a request only gets the
+    // cookie if it opts in with credentials: 'include'. Keeping it on
+    // unconditionally means both environments behave the same way.
     credentials: 'include',
     ...options,
   });

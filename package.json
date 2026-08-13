@@ -1,6 +1,7 @@
 {
   "name": "eggfarm",
   "private": true,
+  "type": "module",
   "scripts": {
     "postinstall": "npm install --prefix server && npm install --prefix client",
     "dev": "concurrently -n SERVER,CLIENT -c blue,magenta \"npm run dev --prefix server\" \"npm run dev --prefix client\""

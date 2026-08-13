@@ -12,7 +12,7 @@ import { requireAuth } from "./lib/requireAuth.js";
 
 const app = express();
 
-// Render sits in front of the app as a reverse proxy and terminates TLS
+// Vercel sits in front of the app as a reverse proxy and terminates TLS
 // itself — without this, Express sees every request as plain http (even
 // ones that arrived over https) and req.secure is always false, which
 // would force the auth cookie into insecure/Lax mode in production.
@@ -63,7 +63,16 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.status(status).json({ error: status === 400 ? "invalid JSON body" : "internal server error" });
 });
 
-const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => {
-  console.log(`Server listening on http://localhost:${port}`);
-});
+// Vercel imports this module and calls `app` directly per-request; it
+// never runs this file as a long-lived process, so app.listen() would be
+// dead weight there (and there's no port to bind in that environment).
+// Local dev (`tsx watch src/index.ts`) still runs this file directly,
+// where VERCEL is unset, so the listener still starts as before.
+if (!process.env.VERCEL) {
+  const port = Number(process.env.PORT) || 3000;
+  app.listen(port, () => {
+    console.log(`Server listening on http://localhost:${port}`);
+  });
+}
+
+export default app;
