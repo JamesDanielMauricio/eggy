@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -114,6 +114,63 @@ function aggregateByPeriod(sales, expenses, granularity) {
   const sorted = Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
   const limited = sorted.slice(-PERIOD_LIMITS[granularity]);
   return limited.map((g) => ({ ...g, label: formatPeriodLabel(g.key, granularity), profit: g.revenue - g.expenses }));
+}
+
+// ISO 8601 weeks start Monday and week 1 is whichever week contains
+// Jan 4th. Needed to translate the browser's native <input type="week">
+// value ("2026-W07") into the same Monday-keyed grouping getWeekKey
+// already uses everywhere else in this file, so period filtering lines
+// up with how the trend chart buckets weeks.
+function isoWeekValueToMonday(weekValue) {
+  const [yearStr, weekStr] = weekValue.split('-W');
+  const year = Number(yearStr);
+  const week = Number(weekStr);
+  const jan4 = new Date(year, 0, 4);
+  const jan4Day = jan4.getDay() || 7;
+  const week1Monday = new Date(year, 0, 4 - jan4Day + 1);
+  const monday = new Date(week1Monday.getFullYear(), week1Monday.getMonth(), week1Monday.getDate() + (week - 1) * 7);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getCurrentISOWeekValue() {
+  const today = new Date();
+  const day = today.getDay() || 7;
+  const thursday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 4 - day);
+  const yearStart = new Date(thursday.getFullYear(), 0, 1);
+  const weekNo = Math.ceil(((thursday - yearStart) / 86400000 + 1) / 7);
+  return `${thursday.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+// Default picker value for each mode, so switching granularity always
+// lands on "now" (today / this week / this month / this year) instead of
+// an empty picker.
+function getPeriodDefaultValue(granularity) {
+  if (granularity === 'daily') return getTodayLocal();
+  if (granularity === 'weekly') return getCurrentISOWeekValue();
+  if (granularity === 'monthly') return getTodayLocal().slice(0, 7);
+  return getTodayLocal().slice(0, 4);
+}
+
+function isInSelectedPeriod(dateStr, granularity, periodValue) {
+  if (!periodValue) return false;
+  if (granularity === 'daily') return dateStr === periodValue;
+  if (granularity === 'weekly') return getWeekKey(dateStr) === isoWeekValueToMonday(periodValue);
+  if (granularity === 'monthly') return dateStr.slice(0, 7) === periodValue;
+  return dateStr.slice(0, 4) === periodValue;
+}
+
+function formatSelectedPeriodLabel(granularity, periodValue) {
+  if (!periodValue) return '';
+  if (granularity === 'daily') return formatDateDisplay(periodValue);
+  if (granularity === 'weekly') return `Week of ${formatDateDisplay(isoWeekValueToMonday(periodValue))}`;
+  if (granularity === 'monthly') {
+    const [y, m] = periodValue.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }
+  return periodValue;
 }
 
 function aggregateBy(items, keyFn, valueFn) {
@@ -242,6 +299,28 @@ function ErrorBanner({ message, onClose }) {
   );
 }
 
+// Shown during a background refresh (see the visibilitychange effect in
+// EggFarmDashboard) so a slow one — e.g. Vercel's function and Neon's
+// compute both waking up after the PWA sat idle — doesn't look like the
+// app is just frozen. 'syncing' only appears after a short delay and
+// 'slow' only after a few seconds, so a normal, already-warm refresh
+// never flashes anything on screen.
+function SyncBanner({ status }) {
+  if (status === 'idle') return null;
+  const message = status === 'slow'
+    ? 'Still syncing — the server may be waking up, this can take a few seconds…'
+    : 'Syncing…';
+  return (
+    <div
+      className="text-sm rounded-lg px-3 py-2 mb-4 flex items-center gap-2"
+      style={{ backgroundColor: '#EEF1E4', border: `1px solid ${COLORS.moss}55`, color: COLORS.moss, fontFamily: FONT_BODY }}
+    >
+      <Loader2 size={14} className="animate-spin" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 function StatCard({ icon, label, value, color }) {
   return (
     <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
@@ -314,6 +393,89 @@ function PieCard({ title, data, colors, empty, emptyText, valueFormatter }) {
   );
 }
 
+// Native picker matching the selected granularity. Note: <input type="week">
+// only renders as a real week-picker in Chromium browsers — Firefox and
+// Safari fall back to a plain text field there, a known HTML limitation,
+// not something fixable from this end without building a custom widget.
+function PeriodPicker({ granularity, value, onChange, availableYears }) {
+  const style = { ...inputStyle, maxWidth: 200 };
+  if (granularity === 'daily') {
+    return <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style} />;
+  }
+  if (granularity === 'weekly') {
+    return <input type="week" value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style} />;
+  }
+  if (granularity === 'monthly') {
+    return <input type="month" value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style} />;
+  }
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style}>
+      {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
+    </select>
+  );
+}
+
+// Production (eggs) and money (pesos) sit on very different scales, so
+// this chart splits them across two Y axes rather than forcing all three
+// bars onto one — production reads off the left axis, expenses/sales
+// off the right.
+function PeriodAverageCard({
+  avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange,
+  availableYears, avgPeriodLabel, avgPeriodProduction, avgPeriodExpenseAmt,
+  avgPeriodSaleAmt, avgPeriodCounts,
+}) {
+  const hasData = avgPeriodCounts.harvests > 0 || avgPeriodCounts.expenses > 0 || avgPeriodCounts.sales > 0;
+  const chartData = [{
+    label: avgPeriodLabel,
+    production: avgPeriodProduction,
+    expenses: avgPeriodExpenseAmt,
+    sales: avgPeriodSaleAmt,
+  }];
+
+  return (
+    <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 className="font-semibold" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>Period Averages</h2>
+        <GranularityToggle value={avgGranularity} onChange={onAvgGranularityChange} />
+      </div>
+      <div className="mb-3">
+        <PeriodPicker granularity={avgGranularity} value={avgPeriodValue} onChange={onAvgPeriodValueChange} availableYears={availableYears} />
+      </div>
+      {!hasData ? (
+        <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>No entries for this period.</p>
+      ) : (
+        <>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={chartData} margin={{ left: -10, right: -10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.cardBorder} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
+              <YAxis yAxisId="eggs" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
+              <YAxis yAxisId="pesos" orientation="right" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
+              <Tooltip
+                formatter={(value, name) => {
+                  if (name === 'production') return [`${Math.round(value).toLocaleString()} eggs`, 'Avg Production'];
+                  return [formatCurrency(value), name === 'expenses' ? 'Avg Expense' : 'Avg Sale'];
+                }}
+                contentStyle={{ borderRadius: 8, border: `1px solid ${COLORS.cardBorder}`, fontSize: 12, fontFamily: FONT_BODY }}
+              />
+              <Legend
+                wrapperStyle={{ fontSize: 12, fontFamily: FONT_BODY }}
+                formatter={(v) => (v === 'production' ? 'Avg Production' : v === 'expenses' ? 'Avg Expense' : 'Avg Sale')}
+              />
+              <Bar yAxisId="eggs" dataKey="production" fill={COLORS.yolk} radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="pesos" dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="pesos" dataKey="sales" fill={COLORS.moss} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="text-xs mt-2" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>
+            Based on {avgPeriodCounts.harvests} harvest{avgPeriodCounts.harvests === 1 ? '' : 's'}, {avgPeriodCounts.expenses} expense{avgPeriodCounts.expenses === 1 ? '' : 's'}, {avgPeriodCounts.sales} sale{avgPeriodCounts.sales === 1 ? '' : 's'} logged for this period.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function EmptyState() {
   return (
     <div className="rounded-2xl p-8 shadow-sm text-center" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
@@ -329,6 +491,9 @@ function DashboardView({
   avgRevenuePerPeriod, granularity, setGranularity, chartData,
   sizeBreakdown, expenseBreakdown, hasSales, hasExpenses,
   avgHarvested, avgRejected,
+  avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange,
+  availableYears, avgPeriodLabel, avgPeriodProduction, avgPeriodExpenseAmt,
+  avgPeriodSaleAmt, avgPeriodCounts,
 }) {
   const granularityLabels = { daily: 'Day', weekly: 'Week', monthly: 'Month', yearly: 'Year' };
 
@@ -380,6 +545,19 @@ function DashboardView({
               </ResponsiveContainer>
             )}
           </div>
+
+          <PeriodAverageCard
+            avgGranularity={avgGranularity}
+            onAvgGranularityChange={onAvgGranularityChange}
+            avgPeriodValue={avgPeriodValue}
+            onAvgPeriodValueChange={onAvgPeriodValueChange}
+            availableYears={availableYears}
+            avgPeriodLabel={avgPeriodLabel}
+            avgPeriodProduction={avgPeriodProduction}
+            avgPeriodExpenseAmt={avgPeriodExpenseAmt}
+            avgPeriodSaleAmt={avgPeriodSaleAmt}
+            avgPeriodCounts={avgPeriodCounts}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <PieCard
@@ -950,6 +1128,33 @@ export default function EggFarmDashboard({ username, onLogout }) {
   const [tab, setTab] = useState('dashboard');
   const [granularity, setGranularity] = useState('daily');
   const [error, setErrorMsg] = useState('');
+  const [avgGranularity, setAvgGranularity] = useState('daily');
+  const [avgPeriodValue, setAvgPeriodValue] = useState(() => getPeriodDefaultValue('daily'));
+  // 'idle' | 'syncing' | 'slow' — drives SyncBanner, shown only for a
+  // background refresh (see the visibilitychange effect below).
+  const [syncStatus, setSyncStatus] = useState('idle');
+
+  // Shared by every load() call (mount or background) instead of a local
+  // flag scoped to one effect, since background refreshes are triggered
+  // from a separate effect further down.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // Reset (not just initialize) on mount: React StrictMode's dev-only
+    // double-invoke runs this effect's cleanup once immediately after the
+    // first mount to test for leaks, which would otherwise leave this
+    // stuck at false forever — silently dropping every setState in load()
+    // below, including the one that clears the loading spinner.
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Switching modes (Day/Week/Month/Year) resets the picker to "now" in
+  // that mode, rather than leaving it on a value that no longer makes
+  // sense (e.g. a leftover week string after switching to Year).
+  function handleAvgGranularityChange(g) {
+    setAvgGranularity(g);
+    setAvgPeriodValue(getPeriodDefaultValue(g));
+  }
 
   useEffect(() => {
     const link = document.createElement('link');
@@ -959,50 +1164,90 @@ export default function EggFarmDashboard({ username, onLogout }) {
     return () => { document.head.removeChild(link); };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    async function load() {
-      // Fire all three requests together instead of one-at-a-time — calling
-      // these without awaiting starts each fetch immediately, so they run
-      // concurrently on the network. The awaits below just pick up results
-      // as they arrive; each keeps its own try/catch so one endpoint failing
-      // (e.g. harvests) still lets the other two populate normally.
-      const salesPromise = api.listSales();
-      const expensesPromise = api.listExpenses();
-      const harvestsPromise = api.listHarvests();
-
-      try {
-        const s = await salesPromise;
-        if (mounted) setSales(s);
-      } catch (e) {
-        if (mounted) {
-          setSales([]);
-          setErrorMsg('Could not load sales. Please try again.');
-        }
-      }
-      try {
-        const ex = await expensesPromise;
-        if (mounted) setExpenses(ex);
-      } catch (e) {
-        if (mounted) {
-          setExpenses([]);
-          setErrorMsg('Could not load expenses. Please try again.');
-        }
-      }
-      try {
-        const h = await harvestsPromise;
-        if (mounted) setHarvests(h);
-      } catch (e) {
-        if (mounted) {
-          setHarvests([]);
-          setErrorMsg('Could not load harvests. Please try again.');
-        }
-      }
-      if (mounted) setLoading(false);
+  // background=true is used for a resume refresh (see the visibilitychange
+  // effect below): it skips the SyncBanner delay logic on the initial
+  // mount load, and on failure leaves existing data on screen instead of
+  // wiping it to empty — stale data the user can still see beats a blank
+  // dashboard because one request hit a slow cold start.
+  const load = useCallback(async ({ background = false } = {}) => {
+    let syncingTimer;
+    let slowTimer;
+    if (background) {
+      // Only surface the banner if this is actually slow — most resumes
+      // hit an already-warm backend and finish near-instantly, and
+      // flashing a status message for those would just be noise. "slow"
+      // lands around what a cold Vercel function + cold Neon compute
+      // together tend to cost, which is the case worth telling the user
+      // about.
+      syncingTimer = setTimeout(() => { if (mountedRef.current) setSyncStatus('syncing'); }, 500);
+      slowTimer = setTimeout(() => { if (mountedRef.current) setSyncStatus('slow'); }, 3000);
     }
-    load();
-    return () => { mounted = false; };
+
+    // Fire all three requests together instead of one-at-a-time — calling
+    // these without awaiting starts each fetch immediately, so they run
+    // concurrently on the network. The awaits below just pick up results
+    // as they arrive; each keeps its own try/catch so one endpoint failing
+    // (e.g. harvests) still lets the other two populate normally.
+    const salesPromise = api.listSales();
+    const expensesPromise = api.listExpenses();
+    const harvestsPromise = api.listHarvests();
+
+    try {
+      const s = await salesPromise;
+      if (mountedRef.current) setSales(s);
+    } catch (e) {
+      if (mountedRef.current) {
+        if (!background) setSales([]);
+        setErrorMsg('Could not load sales. Please try again.');
+      }
+    }
+    try {
+      const ex = await expensesPromise;
+      if (mountedRef.current) setExpenses(ex);
+    } catch (e) {
+      if (mountedRef.current) {
+        if (!background) setExpenses([]);
+        setErrorMsg('Could not load expenses. Please try again.');
+      }
+    }
+    try {
+      const h = await harvestsPromise;
+      if (mountedRef.current) setHarvests(h);
+    } catch (e) {
+      if (mountedRef.current) {
+        if (!background) setHarvests([]);
+        setErrorMsg('Could not load harvests. Please try again.');
+      }
+    }
+
+    if (mountedRef.current) {
+      setLoading(false);
+      if (background) {
+        clearTimeout(syncingTimer);
+        clearTimeout(slowTimer);
+        setSyncStatus('idle');
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Mobile PWAs are often kept alive in the background instead of being
+  // fully closed, so reopening the app can show data that's minutes or
+  // hours stale with no indication anything needs refreshing. Refetching
+  // on every foreground return keeps things current — these are cheap,
+  // already-parallelized reads, and pinging on resume has the side benefit
+  // of helping keep Vercel's function and Neon's compute from going cold
+  // as often in the first place.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') load({ background: true });
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [load]);
 
   // Optimistic: show the sale immediately under a temporary id rather than
   // waiting for the round trip. On success we swap in the server's row (real
@@ -1119,6 +1364,47 @@ export default function EggFarmDashboard({ username, onLogout }) {
   const avgHarvested = harvests.length ? Math.round(totalHarvested / harvests.length) : 0;
   const avgRejected = harvests.length ? Math.round(totalRejected / harvests.length) : 0;
 
+  // "Period Averages" card: independent of the granularity above (which
+  // drives the Revenue vs Expenses trend). This lets a specific day/week/
+  // month/year be picked and shows the average per entry logged in it —
+  // same sum/count idea as avgHarvested/avgRejected, scoped to whatever
+  // period the user picks instead of all-time.
+  const avgPeriodSales = useMemo(
+    () => paidSales.filter((s) => isInSelectedPeriod(s.date, avgGranularity, avgPeriodValue)),
+    [paidSales, avgGranularity, avgPeriodValue]
+  );
+  const avgPeriodExpenses = useMemo(
+    () => expenses.filter((e) => isInSelectedPeriod(e.date, avgGranularity, avgPeriodValue)),
+    [expenses, avgGranularity, avgPeriodValue]
+  );
+  const avgPeriodHarvests = useMemo(
+    () => harvests.filter((h) => isInSelectedPeriod(h.date, avgGranularity, avgPeriodValue)),
+    [harvests, avgGranularity, avgPeriodValue]
+  );
+  const avgPeriodProduction = avgPeriodHarvests.length
+    ? Math.round(avgPeriodHarvests.reduce((s, h) => s + h.harvested, 0) / avgPeriodHarvests.length)
+    : 0;
+  const avgPeriodExpenseAmt = avgPeriodExpenses.length
+    ? avgPeriodExpenses.reduce((s, e) => s + e.quantity * e.price, 0) / avgPeriodExpenses.length
+    : 0;
+  const avgPeriodSaleAmt = avgPeriodSales.length
+    ? avgPeriodSales.reduce((s, s2) => s + s2.quantity * s2.pricePerEgg, 0) / avgPeriodSales.length
+    : 0;
+  const avgPeriodLabel = formatSelectedPeriodLabel(avgGranularity, avgPeriodValue);
+  const avgPeriodCounts = {
+    harvests: avgPeriodHarvests.length,
+    expenses: avgPeriodExpenses.length,
+    sales: avgPeriodSales.length,
+  };
+
+  const availableYears = useMemo(() => {
+    const years = new Set([String(new Date().getFullYear())]);
+    sales.forEach((s) => years.add(s.date.slice(0, 4)));
+    expenses.forEach((e) => years.add(e.date.slice(0, 4)));
+    harvests.forEach((h) => years.add(h.date.slice(0, 4)));
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [sales, expenses, harvests]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.paper }}>
@@ -1131,6 +1417,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
     <div className="min-h-screen pb-24" style={{ backgroundColor: COLORS.paper, fontFamily: FONT_BODY, color: COLORS.ink }}>
       <Header username={username} onLogout={onLogout} />
       <main className="max-w-4xl mx-auto px-4 pt-4">
+        <SyncBanner status={syncStatus} />
         {error && <ErrorBanner message={error} onClose={() => setErrorMsg('')} />}
         {tab === 'dashboard' && (
           <DashboardView
@@ -1149,6 +1436,16 @@ export default function EggFarmDashboard({ username, onLogout }) {
             hasExpenses={expenses.length > 0}
             avgHarvested={avgHarvested}
             avgRejected={avgRejected}
+            avgGranularity={avgGranularity}
+            onAvgGranularityChange={handleAvgGranularityChange}
+            avgPeriodValue={avgPeriodValue}
+            onAvgPeriodValueChange={setAvgPeriodValue}
+            availableYears={availableYears}
+            avgPeriodLabel={avgPeriodLabel}
+            avgPeriodProduction={avgPeriodProduction}
+            avgPeriodExpenseAmt={avgPeriodExpenseAmt}
+            avgPeriodSaleAmt={avgPeriodSaleAmt}
+            avgPeriodCounts={avgPeriodCounts}
           />
         )}
         {tab === 'addSale' && <AddSaleForm onSubmit={addSale} />}
