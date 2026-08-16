@@ -415,22 +415,26 @@ function PeriodPicker({ granularity, value, onChange, availableYears }) {
   );
 }
 
-// Production (eggs) and money (pesos) sit on very different scales, so
-// this chart splits them across two Y axes rather than forcing all three
-// bars onto one — production reads off the left axis, expenses/sales
-// off the right.
+// A single selected period reduces to three headline numbers (sales,
+// expenses, profit) — a bar chart would just draw one lonely bar per
+// category, so this is a small KPI row instead, the same "stamp + label +
+// value" language as the StatCards at the top of the dashboard.
+function MiniStatTile({ icon, label, value, color }) {
+  return (
+    <div className="rounded-xl p-3" style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.cardBorder}` }}>
+      <StampBadge icon={icon} color={color} size={32} />
+      <p className="text-xs mt-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{label}</p>
+      <p className="text-base font-bold mt-0.5 truncate" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>{value}</p>
+    </div>
+  );
+}
+
 function PeriodAverageCard({
   avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange,
-  availableYears, avgPeriodLabel, avgPeriodProduction, avgPeriodExpenseAmt,
-  avgPeriodSaleAmt, avgPeriodCounts,
+  availableYears, avgPeriodLabel, periodSalesTotal, periodExpensesTotal,
+  periodProfit, avgPeriodCounts,
 }) {
-  const hasData = avgPeriodCounts.harvests > 0 || avgPeriodCounts.expenses > 0 || avgPeriodCounts.sales > 0;
-  const chartData = [{
-    label: avgPeriodLabel,
-    production: avgPeriodProduction,
-    expenses: avgPeriodExpenseAmt,
-    sales: avgPeriodSaleAmt,
-  }];
+  const hasData = avgPeriodCounts.expenses > 0 || avgPeriodCounts.sales > 0;
 
   return (
     <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
@@ -445,30 +449,19 @@ function PeriodAverageCard({
         <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>No entries for this period.</p>
       ) : (
         <>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={chartData} margin={{ left: -10, right: -10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.cardBorder} />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
-              <YAxis yAxisId="eggs" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
-              <YAxis yAxisId="pesos" orientation="right" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
-              <Tooltip
-                formatter={(value, name) => {
-                  if (name === 'production') return [`${Math.round(value).toLocaleString()} eggs`, 'Avg Production'];
-                  return [formatCurrency(value), name === 'expenses' ? 'Avg Expense' : 'Avg Sale'];
-                }}
-                contentStyle={{ borderRadius: 8, border: `1px solid ${COLORS.cardBorder}`, fontSize: 12, fontFamily: FONT_BODY }}
-              />
-              <Legend
-                wrapperStyle={{ fontSize: 12, fontFamily: FONT_BODY }}
-                formatter={(v) => (v === 'production' ? 'Avg Production' : v === 'expenses' ? 'Avg Expense' : 'Avg Sale')}
-              />
-              <Bar yAxisId="eggs" dataKey="production" fill={COLORS.yolk} radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="pesos" dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="pesos" dataKey="sales" fill={COLORS.moss} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-          <p className="text-xs mt-2" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>
-            Based on {avgPeriodCounts.harvests} harvest{avgPeriodCounts.harvests === 1 ? '' : 's'}, {avgPeriodCounts.expenses} expense{avgPeriodCounts.expenses === 1 ? '' : 's'}, {avgPeriodCounts.sales} sale{avgPeriodCounts.sales === 1 ? '' : 's'} logged for this period.
+          <p className="text-xs mb-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{avgPeriodLabel}</p>
+          <div className="grid grid-cols-3 gap-2">
+            <MiniStatTile icon={<DollarSign size={16} />} label="Sales" value={formatCurrency(periodSalesTotal)} color={COLORS.moss} />
+            <MiniStatTile icon={<Receipt size={16} />} label="Expenses" value={formatCurrency(periodExpensesTotal)} color={COLORS.brick} />
+            <MiniStatTile
+              icon={periodProfit >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+              label="Profit"
+              value={formatCurrency(periodProfit)}
+              color={periodProfit >= 0 ? COLORS.moss : COLORS.brick}
+            />
+          </div>
+          <p className="text-xs mt-3" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>
+            Based on {avgPeriodCounts.sales} sale{avgPeriodCounts.sales === 1 ? '' : 's'}, {avgPeriodCounts.expenses} expense{avgPeriodCounts.expenses === 1 ? '' : 's'} logged for this period.
           </p>
         </>
       )}
@@ -492,8 +485,8 @@ function DashboardView({
   sizeBreakdown, expenseBreakdown, hasSales, hasExpenses,
   avgHarvested, avgRejected,
   avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange,
-  availableYears, avgPeriodLabel, avgPeriodProduction, avgPeriodExpenseAmt,
-  avgPeriodSaleAmt, avgPeriodCounts,
+  availableYears, avgPeriodLabel, periodSalesTotal, periodExpensesTotal,
+  periodProfit, avgPeriodCounts,
 }) {
   const granularityLabels = { daily: 'Day', weekly: 'Week', monthly: 'Month', yearly: 'Year' };
 
@@ -553,9 +546,9 @@ function DashboardView({
             onAvgPeriodValueChange={onAvgPeriodValueChange}
             availableYears={availableYears}
             avgPeriodLabel={avgPeriodLabel}
-            avgPeriodProduction={avgPeriodProduction}
-            avgPeriodExpenseAmt={avgPeriodExpenseAmt}
-            avgPeriodSaleAmt={avgPeriodSaleAmt}
+            periodSalesTotal={periodSalesTotal}
+            periodExpensesTotal={periodExpensesTotal}
+            periodProfit={periodProfit}
             avgPeriodCounts={avgPeriodCounts}
           />
 
@@ -1366,9 +1359,9 @@ export default function EggFarmDashboard({ username, onLogout }) {
 
   // "Period Averages" card: independent of the granularity above (which
   // drives the Revenue vs Expenses trend). This lets a specific day/week/
-  // month/year be picked and shows the average per entry logged in it —
-  // same sum/count idea as avgHarvested/avgRejected, scoped to whatever
-  // period the user picks instead of all-time.
+  // month/year be picked and shows the profit — paid sales minus expenses,
+  // the same way netProfit is computed above but scoped to just that period
+  // instead of all-time.
   const avgPeriodSales = useMemo(
     () => paidSales.filter((s) => isInSelectedPeriod(s.date, avgGranularity, avgPeriodValue)),
     [paidSales, avgGranularity, avgPeriodValue]
@@ -1377,22 +1370,11 @@ export default function EggFarmDashboard({ username, onLogout }) {
     () => expenses.filter((e) => isInSelectedPeriod(e.date, avgGranularity, avgPeriodValue)),
     [expenses, avgGranularity, avgPeriodValue]
   );
-  const avgPeriodHarvests = useMemo(
-    () => harvests.filter((h) => isInSelectedPeriod(h.date, avgGranularity, avgPeriodValue)),
-    [harvests, avgGranularity, avgPeriodValue]
-  );
-  const avgPeriodProduction = avgPeriodHarvests.length
-    ? Math.round(avgPeriodHarvests.reduce((s, h) => s + h.harvested, 0) / avgPeriodHarvests.length)
-    : 0;
-  const avgPeriodExpenseAmt = avgPeriodExpenses.length
-    ? avgPeriodExpenses.reduce((s, e) => s + e.quantity * e.price, 0) / avgPeriodExpenses.length
-    : 0;
-  const avgPeriodSaleAmt = avgPeriodSales.length
-    ? avgPeriodSales.reduce((s, s2) => s + s2.quantity * s2.pricePerEgg, 0) / avgPeriodSales.length
-    : 0;
+  const periodSalesTotal = avgPeriodSales.reduce((s, s2) => s + s2.quantity * s2.pricePerEgg, 0);
+  const periodExpensesTotal = avgPeriodExpenses.reduce((s, e) => s + e.quantity * e.price, 0);
+  const periodProfit = periodSalesTotal - periodExpensesTotal;
   const avgPeriodLabel = formatSelectedPeriodLabel(avgGranularity, avgPeriodValue);
   const avgPeriodCounts = {
-    harvests: avgPeriodHarvests.length,
     expenses: avgPeriodExpenses.length,
     sales: avgPeriodSales.length,
   };
@@ -1442,9 +1424,9 @@ export default function EggFarmDashboard({ username, onLogout }) {
             onAvgPeriodValueChange={setAvgPeriodValue}
             availableYears={availableYears}
             avgPeriodLabel={avgPeriodLabel}
-            avgPeriodProduction={avgPeriodProduction}
-            avgPeriodExpenseAmt={avgPeriodExpenseAmt}
-            avgPeriodSaleAmt={avgPeriodSaleAmt}
+            periodSalesTotal={periodSalesTotal}
+            periodExpensesTotal={periodExpensesTotal}
+            periodProfit={periodProfit}
             avgPeriodCounts={avgPeriodCounts}
           />
         )}
