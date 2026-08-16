@@ -962,8 +962,17 @@ export default function EggFarmDashboard({ username, onLogout }) {
   useEffect(() => {
     let mounted = true;
     async function load() {
+      // Fire all three requests together instead of one-at-a-time — calling
+      // these without awaiting starts each fetch immediately, so they run
+      // concurrently on the network. The awaits below just pick up results
+      // as they arrive; each keeps its own try/catch so one endpoint failing
+      // (e.g. harvests) still lets the other two populate normally.
+      const salesPromise = api.listSales();
+      const expensesPromise = api.listExpenses();
+      const harvestsPromise = api.listHarvests();
+
       try {
-        const s = await api.listSales();
+        const s = await salesPromise;
         if (mounted) setSales(s);
       } catch (e) {
         if (mounted) {
@@ -972,7 +981,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
         }
       }
       try {
-        const ex = await api.listExpenses();
+        const ex = await expensesPromise;
         if (mounted) setExpenses(ex);
       } catch (e) {
         if (mounted) {
@@ -981,7 +990,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
         }
       }
       try {
-        const h = await api.listHarvests();
+        const h = await harvestsPromise;
         if (mounted) setHarvests(h);
       } catch (e) {
         if (mounted) {
