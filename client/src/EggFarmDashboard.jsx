@@ -9,27 +9,41 @@ import {
   CheckCircle2, Pencil,
 } from 'lucide-react';
 import * as api from './lib/api';
-import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle } from './lib/theme';
+import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle, ELEVATION, NUM_TABULAR } from './lib/theme';
 
 const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large', 'Jumbo', 'Reject'];
 const EXPENSE_ITEMS = ['Feeds', 'Fly Trap', 'Medicines/Vitamins', 'Others'];
 const CURRENCY = '₱';
 
+// Egg sizes are an ordered scale, so they get a single-hue amber ramp that
+// runs light→dark with the size. Stepped so each grade is visibly distinct
+// from its neighbour and the lightest still reads against the cream card —
+// the old ramp's 'Extra Small' sat at 1.39:1 on this background (all but
+// invisible) and 'Small'/'Medium' were too close to tell apart.
+// Reject is deliberately outside the ramp: it isn't a size grade, so it
+// stays neutral gray rather than borrowing a position on the scale.
 const EGG_SIZE_COLORS = {
-  'Extra Small': '#F3D48A',
-  'Small': '#E9BB56',
-  'Medium': '#E5A62E',
-  'Large': '#B97D28',
-  'Extra Large': '#7A4F1E',
-  'Jumbo': '#4F2F13',
+  'Extra Small': '#D3A94E',
+  'Small': '#C08C2C',
+  'Medium': '#A8701D',
+  'Large': '#8A5318',
+  'Extra Large': '#653B14',
+  'Jumbo': '#3E230E',
   'Reject': '#8B8577',
 };
 
+// Expense categories have no natural order, so these are four distinct hues
+// rather than a ramp. Checked against the cream chart surface for
+// colour-blind separation: the previous green/teal pair was only ΔE 12.7
+// apart for normal vision (below the 15 floor — genuinely hard to tell
+// apart), and three of the four were desaturated enough to read as gray.
+// Green↔brick still sits in the deuteranopia warn band, which is why every
+// slice carries a printed percentage as well as its colour.
 const EXPENSE_COLORS = {
-  'Feeds': '#6B8E4E',
-  'Fly Trap': '#4E7A8C',
-  'Medicines/Vitamins': '#9B4433',
-  'Others': '#8C8272',
+  'Feeds': '#4E8B2B',
+  'Fly Trap': '#2B6096',
+  'Medicines/Vitamins': '#A83C25',
+  'Others': '#D19A22',
 };
 
 const PERIOD_LIMITS = { daily: 30, weekly: 12, monthly: 12, yearly: 6 };
@@ -182,6 +196,12 @@ function aggregateBy(items, keyFn, valueFn) {
   return Object.entries(groups).map(([name, value]) => ({ name, value }));
 }
 
+// Staggers a list's entrance animation, capped so that in a 47-row ledger the
+// last rows aren't still visibly waiting to appear.
+function rowDelay(index) {
+  return Math.min(index, 8) * 35;
+}
+
 function Field({ label, children }) {
   return (
     <label className="block">
@@ -240,7 +260,10 @@ function StampBadge({ icon, color, size = 44 }) {
         width: size,
         height: size,
         border: `2px solid ${color}`,
-        boxShadow: `0 0 0 3px ${color}22`,
+        // Tinted fill inside the ring plus a soft halo — the old badge was a
+        // bare outline sitting on the card, which read as unfinished.
+        backgroundColor: `${color}14`,
+        boxShadow: `0 0 0 4px ${color}12`,
         color,
         transform: 'rotate(-6deg)',
       }}
@@ -252,30 +275,51 @@ function StampBadge({ icon, color, size = 44 }) {
 
 function Header({ username, onLogout }) {
   return (
-    <header className="px-4 py-4 shadow-md" style={{ backgroundColor: COLORS.barnwood }}>
+    <header
+      className="px-4 py-4 sticky top-0 z-20"
+      style={{
+        // Gradient + a gold hairline along the bottom edge, so the header
+        // reads as a lit surface rather than a flat brown block.
+        backgroundImage: `linear-gradient(160deg, #4A3120 0%, ${COLORS.barnwood} 55%, ${COLORS.barnwoodDeep} 100%)`,
+        borderBottom: `1px solid ${COLORS.yolk}33`,
+        boxShadow: ELEVATION.lg,
+      }}
+    >
       <div className="max-w-4xl mx-auto flex items-center gap-3">
         <div
-          className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-          style={{ border: `2px solid ${COLORS.yolk}`, transform: 'rotate(-6deg)' }}
+          className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
+          style={{
+            border: `2px solid ${COLORS.yolk}`,
+            backgroundColor: 'rgba(229,166,46,0.12)',
+            boxShadow: `0 0 0 4px ${COLORS.yolk}1A`,
+            transform: 'rotate(-6deg)',
+          }}
         >
           <span style={{ transform: 'rotate(6deg)' }} className="text-lg">🥚</span>
         </div>
-        <div className="flex-1">
-          <h1 className="text-lg font-bold tracking-tight text-white" style={{ fontFamily: FONT_DISPLAY }}>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg font-bold text-white" style={{ fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em' }}>
             Egg Farm Ledger
           </h1>
-          <p className="text-xs" style={{ color: COLORS.yolk, fontFamily: FONT_BODY }}>Sales &amp; expense tracker</p>
+          <p className="text-[11px] tracking-wide" style={{ color: COLORS.gold, fontFamily: FONT_BODY }}>
+            Sales &amp; expense tracker
+          </p>
         </div>
         {onLogout && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {username && (
-              <span className="text-xs" style={{ color: COLORS.yolk, fontFamily: FONT_BODY }}>{username}</span>
+              <span className="text-xs hidden sm:inline" style={{ color: COLORS.gold, fontFamily: FONT_BODY }}>{username}</span>
             )}
             <button
               type="button"
               onClick={onLogout}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
-              style={{ color: 'white', border: `1px solid ${COLORS.yolk}66`, fontFamily: FONT_BODY }}
+              className="eggy-press eggy-focus flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl"
+              style={{
+                color: '#FFF',
+                backgroundColor: 'rgba(255,255,255,0.07)',
+                border: `1px solid ${COLORS.yolk}55`,
+                fontFamily: FONT_BODY,
+              }}
             >
               <LogOut size={14} />
               Log out
@@ -321,12 +365,81 @@ function SyncBanner({ status }) {
   );
 }
 
-function StatCard({ icon, label, value, color }) {
+// `delay` staggers the entrance so the grid assembles rather than snapping
+// in all at once — the single cheapest thing that makes a screen feel built
+// rather than dumped.
+function StatCard({ icon, label, value, color, sub, delay = 0 }) {
   return (
-    <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
-      <StampBadge icon={icon} color={color} />
-      <p className="text-xs mt-2.5" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{label}</p>
-      <p className="text-xl font-bold mt-0.5" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>{value}</p>
+    <div className="eggy-card eggy-rise p-4" style={{ animationDelay: `${delay}ms` }}>
+      <StampBadge icon={icon} color={color} size={38} />
+      <p
+        className="text-[11px] mt-3 font-medium uppercase"
+        style={{ color: COLORS.muted, fontFamily: FONT_BODY, letterSpacing: '0.07em' }}
+      >
+        {label}
+      </p>
+      <p
+        className="text-xl font-bold mt-1"
+        style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em', ...NUM_TABULAR }}
+      >
+        {value}
+      </p>
+      {sub && <p className="text-xs mt-0.5" style={{ color: COLORS.muted, fontFamily: FONT_BODY, ...NUM_TABULAR }}>{sub}</p>}
+    </div>
+  );
+}
+
+// Net profit is the one number the whole ledger exists to answer, but in a
+// uniform 2×3 grid it carried exactly the same visual weight as "Avg
+// Rejects". This gives it its own surface, a tinted wash in the sign's
+// colour, and a figure big enough to read from arm's length.
+function HeroStatCard({ icon, label, value, color, caption, positive }) {
+  return (
+    <div
+      className="eggy-card eggy-rise p-5 relative overflow-hidden"
+      style={{
+        // A very low-opacity wash of the profit/loss colour bleeding in from
+        // the top-right, so "up" and "down" are legible before you read a
+        // single digit — without tinting the whole card and hurting contrast.
+        backgroundImage: `radial-gradient(120% 140% at 100% 0%, ${color}1F 0%, ${color}0A 38%, transparent 68%)`,
+        boxShadow: ELEVATION.lg,
+      }}
+    >
+      {/* Accent rule along the top edge, in the same colour as the figure. */}
+      <div
+        className="absolute inset-x-0 top-0 h-[3px]"
+        style={{ backgroundImage: `linear-gradient(90deg, ${color}, ${color}22)` }}
+      />
+      <div className="flex items-center gap-4">
+        <StampBadge icon={icon} color={color} size={54} />
+        <div className="min-w-0">
+          <p
+            className="text-[11px] font-medium uppercase"
+            style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, letterSpacing: '0.09em' }}
+          >
+            {label}
+          </p>
+          <p
+            className="text-[2.1rem] font-bold mt-1 leading-none"
+            style={{ color, fontFamily: FONT_DISPLAY, letterSpacing: '-0.02em' }}
+          >
+            {value}
+          </p>
+          {caption && (
+            <p className="text-xs mt-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, ...NUM_TABULAR }}>
+              {caption}
+            </p>
+          )}
+        </div>
+      </div>
+      {positive !== undefined && (
+        <span
+          className="absolute top-4 right-4 text-[10px] font-bold px-2 py-1 rounded-full uppercase"
+          style={{ backgroundColor: `${color}1F`, color, fontFamily: FONT_BODY, letterSpacing: '0.06em' }}
+        >
+          {positive ? 'In profit' : 'At a loss'}
+        </span>
+      )}
     </div>
   );
 }
@@ -339,7 +452,7 @@ function GranularityToggle({ value, onChange }) {
     { id: 'yearly', label: 'Year' },
   ];
   return (
-    <div className="flex rounded-lg p-0.5" style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-segment flex">
       {options.map((o) => {
         const active = value === o.id;
         return (
@@ -347,12 +460,12 @@ function GranularityToggle({ value, onChange }) {
             key={o.id}
             type="button"
             onClick={() => onChange(o.id)}
-            className="px-2.5 py-1 text-xs font-medium rounded-md transition-colors"
-            style={{
-              backgroundColor: active ? COLORS.barnwood : 'transparent',
-              color: active ? '#FFFFFF' : COLORS.inkSoft,
-              fontFamily: FONT_BODY,
-            }}
+            aria-pressed={active}
+            // The active state is a raised white pill on a recessed track,
+            // rather than a solid dark block — it reads as a physical
+            // selector instead of a pressed-looking button.
+            className={`eggy-segment-item eggy-focus px-3 py-1.5 text-xs ${active ? 'is-active' : ''}`}
+            style={{ fontFamily: FONT_BODY }}
           >
             {o.label}
           </button>
@@ -362,30 +475,70 @@ function GranularityToggle({ value, onChange }) {
   );
 }
 
+// The amber size ramp runs from light to dark, so no single label colour
+// stays readable across every slice. This picks ink or white by the slice's
+// own relative luminance (the WCAG formula) instead of guessing.
+function labelInkFor(hex) {
+  const channel = (i) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+  const linear = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * linear(channel(0)) + 0.7152 * linear(channel(1)) + 0.0722 * linear(channel(2));
+  return luminance > 0.42 ? COLORS.ink : '#FFFFFF';
+}
+
 function PieCard({ title, data, colors, empty, emptyText, valueFormatter }) {
+  // Percentages sit inside their slice rather than outside on leader lines,
+  // which is what used to collide with the legend below (the "15%" landed
+  // on top of the word "Large"). Slices under 6% are skipped — a label
+  // can't fit inside one — and stay readable via the legend and tooltip.
+  const renderSliceLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+    if (percent < 0.06) return null;
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.62;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    const fill = colors[data[index]?.name] || COLORS.muted;
+    return (
+      <text
+        x={x}
+        y={y}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill={labelInkFor(fill)}
+        style={{ fontSize: 11, fontWeight: 600, fontFamily: FONT_BODY }}
+      >
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
   return (
-    <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-5">
       <h2 className="font-semibold mb-3 text-sm" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>{title}</h2>
       {empty || data.length === 0 ? (
         <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{emptyText}</p>
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={230}>
           <PieChart>
             <Pie
               data={data}
               dataKey="value"
               nameKey="name"
               cx="50%"
-              cy="50%"
-              outerRadius={70}
-              label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+              cy="45%"
+              outerRadius={72}
+              labelLine={false}
+              label={renderSliceLabel}
+              // Card-coloured stroke reads as a gap between slices rather
+              // than an outline drawn around each one.
+              stroke={COLORS.card}
+              strokeWidth={2}
             >
               {data.map((entry, i) => (
                 <Cell key={i} fill={colors[entry.name] || COLORS.muted} />
               ))}
             </Pie>
             <Tooltip formatter={(value, name) => [valueFormatter(value), name]} contentStyle={{ borderRadius: 8, fontSize: 12, fontFamily: FONT_BODY }} />
-            <Legend wrapperStyle={{ fontSize: 11, fontFamily: FONT_BODY }} />
+            <Legend wrapperStyle={{ fontSize: 11, fontFamily: FONT_BODY, paddingTop: 4 }} />
           </PieChart>
         </ResponsiveContainer>
       )}
@@ -437,7 +590,7 @@ function PeriodAverageCard({
   const hasData = avgPeriodCounts.expenses > 0 || avgPeriodCounts.sales > 0;
 
   return (
-    <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-5">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 className="font-semibold" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>Period Averages</h2>
         <GranularityToggle value={avgGranularity} onChange={onAvgGranularityChange} />
@@ -471,7 +624,7 @@ function PeriodAverageCard({
 
 function EmptyState() {
   return (
-    <div className="rounded-2xl p-8 shadow-sm text-center" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-10 text-center">
       <span className="text-4xl">🥚</span>
       <p className="font-medium mt-3" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>No entries yet</p>
       <p className="text-sm mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Add your first sale or expense to see charts here.</p>
@@ -492,25 +645,35 @@ function DashboardView({
 
   return (
     <div className="space-y-5">
+      <HeroStatCard
+        icon={netProfit >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
+        label="Net Profit"
+        value={formatCurrency(netProfit)}
+        color={netProfit >= 0 ? COLORS.moss : COLORS.brick}
+        caption={`${formatCurrency(totalRevenue)} in · ${formatCurrency(totalExpenses)} out`}
+        positive={netProfit >= 0}
+      />
       <div className="grid grid-cols-2 gap-3">
-        <StatCard icon={<DollarSign size={20} />} label="Total Revenue" value={formatCurrency(totalRevenue)} color={COLORS.moss} />
-        <StatCard icon={<Receipt size={20} />} label="Total Expenses" value={formatCurrency(totalExpenses)} color={COLORS.brick} />
+        <StatCard delay={60} icon={<DollarSign size={18} />} label="Revenue" value={formatCurrency(totalRevenue)} color={COLORS.moss} />
+        <StatCard delay={100} icon={<Receipt size={18} />} label="Expenses" value={formatCurrency(totalExpenses)} color={COLORS.brick} />
+        <StatCard delay={140} icon={<span className="text-sm">🥚</span>} label="Eggs Sold" value={totalEggs.toLocaleString()} color={COLORS.yolk} />
+        {/* Harvested and rejected are one measurement pair, so they share a
+            card — as two separate tiles they left an orphan in the grid. */}
         <StatCard
-          icon={netProfit >= 0 ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
-          label="Net Profit"
-          value={formatCurrency(netProfit)}
-          color={netProfit >= 0 ? COLORS.moss : COLORS.brick}
+          delay={180}
+          icon={<Egg size={18} />}
+          label="Avg Harvest"
+          value={`${avgHarvested.toLocaleString()} eggs`}
+          color={COLORS.moss}
+          sub={`${avgRejected.toLocaleString()} rejected`}
         />
-        <StatCard icon={<span className="text-base">🥚</span>} label="Eggs Sold" value={totalEggs.toLocaleString()} color={COLORS.yolk} />
-        <StatCard icon={<Egg size={20} />} label="Avg Production" value={`${avgHarvested.toLocaleString()} eggs`} color={COLORS.moss} />
-        <StatCard icon={<EggOff size={20} />} label="Avg Rejects" value={`${avgRejected.toLocaleString()} eggs`} color={COLORS.brick} />
       </div>
 
       {!hasSales && !hasExpenses ? (
         <EmptyState />
       ) : (
         <>
-          <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+          <div className="eggy-card p-5">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <h2 className="font-semibold" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>Revenue vs Expenses</h2>
               <GranularityToggle value={granularity} onChange={setGranularity} />
@@ -523,10 +686,13 @@ function DashboardView({
               <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>No data for this view yet.</p>
             ) : (
               <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={chartData} margin={{ left: -20, right: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={COLORS.cardBorder} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
-                  <YAxis tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
+                <BarChart data={chartData} margin={{ left: -20, right: 8 }} barGap={2}>
+                  {/* Solid hairline, horizontal only: dashes read as a
+                      threshold or projection when this is just a grid, and
+                      vertical rules add noise on a categorical axis. */}
+                  <CartesianGrid vertical={false} stroke={COLORS.cardBorder} />
+                  <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: COLORS.cardBorder }} tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
+                  <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
                   <Tooltip
                     formatter={(value, name) => [formatCurrency(value), name === 'revenue' ? 'Revenue' : 'Expenses']}
                     contentStyle={{ borderRadius: 8, border: `1px solid ${COLORS.cardBorder}`, fontSize: 12, fontFamily: FONT_BODY }}
@@ -676,7 +842,7 @@ function AddSaleForm({ onSubmit }) {
   }
 
   return (
-    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-5">
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Plus size={16} style={{ color: COLORS.moss }} /> Record a Sale
       </h2>
@@ -724,8 +890,8 @@ function AddSaleForm({ onSubmit }) {
         )}
         <button
           type="submit"
-          className="w-full font-semibold py-2.5 rounded-lg transition-colors"
-          style={{ backgroundColor: isPending ? COLORS.yolk : COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
+          className={`eggy-btn eggy-focus w-full py-3 text-sm ${isPending ? 'eggy-btn-accent' : 'eggy-btn-primary'}`}
+          style={{ fontFamily: FONT_BODY }}
         >
           {isPending ? 'Add Pending Sale' : 'Add Sale'}
         </button>
@@ -786,7 +952,7 @@ function AddExpenseForm({ onSubmit }) {
   }
 
   return (
-    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-5">
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Wallet size={16} style={{ color: COLORS.brick }} /> Record an Expense
       </h2>
@@ -824,8 +990,8 @@ function AddExpenseForm({ onSubmit }) {
         )}
         <button
           type="submit"
-          className="w-full font-semibold py-2.5 rounded-lg transition-colors"
-          style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
+          className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
+          style={{ fontFamily: FONT_BODY }}
         >
           Add Expense
         </button>
@@ -883,7 +1049,7 @@ function EditSaleForm({ sale, onSave, onCancel }) {
   }
 
   return (
-    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.yolk}` }}>
+    <div className="eggy-card p-5 eggy-rise" style={{ borderColor: COLORS.yolk, boxShadow: ELEVATION.lg }}>
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Pencil size={16} style={{ color: COLORS.moss }} /> Edit Sale
       </h2>
@@ -927,8 +1093,8 @@ function EditSaleForm({ sale, onSave, onCancel }) {
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
-            style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY, opacity: saving ? 0.7 : 1 }}
+            className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
+            style={{ fontFamily: FONT_BODY }}
           >
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
@@ -936,8 +1102,8 @@ function EditSaleForm({ sale, onSave, onCancel }) {
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
-            style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+            className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
+            style={{ fontFamily: FONT_BODY }}
           >
             Cancel
           </button>
@@ -991,7 +1157,7 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
   }
 
   return (
-    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.yolk}` }}>
+    <div className="eggy-card p-5 eggy-rise" style={{ borderColor: COLORS.yolk, boxShadow: ELEVATION.lg }}>
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Pencil size={16} style={{ color: COLORS.brick }} /> Edit Expense
       </h2>
@@ -1025,8 +1191,8 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
           <button
             type="submit"
             disabled={saving}
-            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
-            style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY, opacity: saving ? 0.7 : 1 }}
+            className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
+            style={{ fontFamily: FONT_BODY }}
           >
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
@@ -1034,8 +1200,8 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
-            style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+            className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
+            style={{ fontFamily: FONT_BODY }}
           >
             Cancel
           </button>
@@ -1078,7 +1244,7 @@ function AddHarvestForm({ onSubmit }) {
   }
 
   return (
-    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-5">
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Egg size={16} style={{ color: COLORS.yolk }} /> Record a Harvest
       </h2>
@@ -1097,8 +1263,8 @@ function AddHarvestForm({ onSubmit }) {
         )}
         <button
           type="submit"
-          className="w-full font-semibold py-2.5 rounded-lg transition-colors"
-          style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
+          className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
+          style={{ fontFamily: FONT_BODY }}
         >
           Add Harvest
         </button>
@@ -1109,57 +1275,97 @@ function AddHarvestForm({ onSubmit }) {
 
 function EmptyRecords({ text }) {
   return (
-    <div className="rounded-2xl p-8 shadow-sm text-center" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
+    <div className="eggy-card p-10 text-center">
       <p className="text-sm" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{text}</p>
     </div>
   );
 }
 
-function RecordRow({ title, subtitle, description, amount, amountColor, badge, secondaryAction, confirming, removing, onEditClick, onDeleteClick, onCancel }) {
+function RecordRow({ title, subtitle, description, amount, amountColor, badge, secondaryAction, confirming, removing, onEditClick, onDeleteClick, onCancel, delay = 0 }) {
   return (
     <div
-      className="rounded-xl px-4 py-3 shadow-sm flex items-center justify-between gap-3"
+      className="eggy-card-flush eggy-card-interactive eggy-rise px-4 py-3"
       style={{
-        backgroundColor: COLORS.card,
-        border: `1px solid ${COLORS.cardBorder}`,
         overflow: 'hidden',
-        transition: 'opacity 260ms ease, transform 260ms ease, max-height 260ms ease, margin-top 260ms ease, padding 260ms ease',
+        transition: 'opacity 260ms ease, transform 260ms ease, max-height 260ms ease, margin-top 260ms ease, padding 260ms ease, box-shadow 260ms ease',
         opacity: removing ? 0 : 1,
         transform: removing ? 'scale(0.95)' : 'scale(1)',
-        maxHeight: removing ? 0 : 200,
+        maxHeight: removing ? 0 : 280,
+        // A colour-coded edge on the left makes money-in vs money-out
+        // scannable down the list without reading a single figure.
+        borderLeft: `3px solid ${amountColor}`,
+        animationDelay: `${delay}ms`,
         ...(removing ? { marginTop: 0, paddingTop: 0, paddingBottom: 0 } : null),
       }}
     >
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <p className="font-medium text-sm truncate" style={{ color: COLORS.ink, fontFamily: FONT_BODY }}>{title}</p>
-          {badge}
-        </div>
-        <p className="text-xs truncate" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{subtitle}</p>
-        {description && (
-          <p className="text-xs truncate italic" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{description}</p>
-        )}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {!confirming && secondaryAction}
-        <span className="font-semibold text-sm" style={{ color: amountColor, fontFamily: FONT_DISPLAY }}>{amount}</span>
-        {confirming ? (
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={onDeleteClick} className="text-xs px-2 py-1 rounded-md font-medium" style={{ backgroundColor: COLORS.brick, color: '#FFF' }}>Delete</button>
-            <button type="button" onClick={onCancel} className="text-xs px-2 py-1 rounded-md font-medium" style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft }}>Cancel</button>
+      {/* The description/date text gets the full row width and the actions
+          wrap below it when space is tight, rather than sharing one line —
+          on a phone that shared line squeezed the text down to unreadable
+          stubs ("Reject · 15 e…", "Aug 23, 2026 · …"). On a wide screen
+          there's room, so the actions sit back up on the same line. */}
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="font-semibold text-sm" style={{ color: COLORS.ink, fontFamily: FONT_BODY }}>{title}</p>
+            {badge}
           </div>
+          <p className="text-xs mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY, ...NUM_TABULAR }}>{subtitle}</p>
+          {description && (
+            <p
+              className="text-xs mt-1.5 pl-2"
+              style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, borderLeft: `2px solid ${COLORS.hairline}` }}
+            >
+              {description}
+            </p>
+          )}
+        </div>
+        <span
+          className="font-bold text-base shrink-0"
+          style={{ color: amountColor, fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em', ...NUM_TABULAR }}
+        >
+          {amount}
+        </span>
+        {/* With a status button present the cluster is too wide to share a
+            line on a phone, so it drops below. With just the two icon
+            actions it fits inline, which keeps the common (already-settled)
+            row a compact two lines instead of three. */}
+        <div className={`flex items-center justify-end gap-1 ${secondaryAction || confirming ? 'w-full sm:w-auto mt-1.5 sm:mt-0' : 'w-auto -my-1'}`}>
+        {confirming ? (
+          <>
+            {/* Says what's about to happen — the old version swapped in a bare
+                Delete/Cancel pair with no indication of what it applied to. */}
+            <span className="text-xs mr-auto font-medium" style={{ color: COLORS.brick, fontFamily: FONT_BODY }}>Delete this entry?</span>
+            <button
+              type="button"
+              onClick={onDeleteClick}
+              className="eggy-btn eggy-focus text-xs px-3 py-1.5"
+              style={{ backgroundColor: COLORS.brick, color: '#FFF', fontFamily: FONT_BODY, boxShadow: ELEVATION.sm }}
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="eggy-btn eggy-btn-quiet eggy-focus text-xs px-3 py-1.5"
+              style={{ fontFamily: FONT_BODY }}
+            >
+              Cancel
+            </button>
+          </>
         ) : (
           <>
+            {secondaryAction}
             {onEditClick && (
-              <button type="button" onClick={onEditClick} className="p-1" style={{ color: COLORS.muted }}>
+              <button type="button" onClick={onEditClick} aria-label="Edit entry" className="eggy-icon-btn eggy-focus">
                 <Pencil size={16} />
               </button>
             )}
-            <button type="button" onClick={onDeleteClick} className="p-1" style={{ color: COLORS.muted }}>
+            <button type="button" onClick={onDeleteClick} aria-label="Delete entry" className="eggy-icon-btn eggy-icon-btn-danger eggy-focus">
               <Trash2 size={16} />
             </button>
           </>
         )}
+        </div>
       </div>
     </div>
   );
@@ -1212,31 +1418,29 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
 
   return (
     <div className="space-y-3">
-      <div className="flex rounded-lg p-1 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
-        <button
-          type="button"
-          onClick={() => { setSubTab('sales'); setConfirmId(null); setEditingId(null); }}
-          className="flex-1 py-2 text-sm font-medium rounded-md"
-          style={{ backgroundColor: subTab === 'sales' ? COLORS.barnwood : 'transparent', color: subTab === 'sales' ? '#FFF' : COLORS.inkSoft, fontFamily: FONT_BODY }}
-        >
-          Sales ({sales.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => { setSubTab('expenses'); setConfirmId(null); setEditingId(null); }}
-          className="flex-1 py-2 text-sm font-medium rounded-md"
-          style={{ backgroundColor: subTab === 'expenses' ? COLORS.barnwood : 'transparent', color: subTab === 'expenses' ? '#FFF' : COLORS.inkSoft, fontFamily: FONT_BODY }}
-        >
-          Expenses ({expenses.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => { setSubTab('harvests'); setConfirmId(null); setEditingId(null); }}
-          className="flex-1 py-2 text-sm font-medium rounded-md"
-          style={{ backgroundColor: subTab === 'harvests' ? COLORS.barnwood : 'transparent', color: subTab === 'harvests' ? '#FFF' : COLORS.inkSoft, fontFamily: FONT_BODY }}
-        >
-          Harvests ({harvests.length})
-        </button>
+      {/* Sticky so you can switch ledgers without scrolling back up through
+          forty-odd rows first. */}
+      <div className="eggy-segment flex sticky top-[76px] z-10" style={{ boxShadow: ELEVATION.sm }}>
+        {[
+          { id: 'sales', label: 'Sales', count: sales.length },
+          { id: 'expenses', label: 'Expenses', count: expenses.length },
+          { id: 'harvests', label: 'Harvests', count: harvests.length },
+        ].map((t) => {
+          const active = subTab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => { setSubTab(t.id); setConfirmId(null); setEditingId(null); }}
+              aria-pressed={active}
+              className={`eggy-segment-item eggy-focus flex-1 py-2 text-sm ${active ? 'is-active' : ''}`}
+              style={{ fontFamily: FONT_BODY }}
+            >
+              {t.label}{' '}
+              <span style={{ color: active ? COLORS.muted : COLORS.muted, ...NUM_TABULAR }}>({t.count})</span>
+            </button>
+          );
+        })}
       </div>
 
       {subTab === 'sales' && (
@@ -1244,7 +1448,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
           <EmptyRecords text="No sales recorded yet." />
         ) : (
           <div className="space-y-2">
-            {sortedSales.map((s) => (
+            {sortedSales.map((s, i) => (
               editingId === s.id ? (
                 <EditSaleForm
                   key={s.id}
@@ -1255,29 +1459,40 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
               ) : (
                 <RecordRow
                   key={s.id}
+                  delay={rowDelay(i)}
                   title={`${s.eggSize} · ${s.quantity} eggs`}
                   subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
                   description={s.description}
                   amount={formatCurrency(s.quantity * s.pricePerEgg)}
-                  amountColor={s.status === 'pending' ? COLORS.muted : COLORS.moss}
+                  amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
                   badge={s.status === 'pending' && (
                     <span
-                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                      style={{ backgroundColor: COLORS.yolk, color: '#FFF', fontFamily: FONT_BODY }}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase"
+                      style={{
+                        backgroundColor: `${COLORS.yolk}24`,
+                        color: COLORS.yolkDeep,
+                        fontFamily: FONT_BODY,
+                        letterSpacing: '0.06em',
+                      }}
                     >
-                      PENDING
+                      Unpaid
                     </span>
                   )}
-                  secondaryAction={
+                  // Only unpaid sales carry an inline status button: settling
+                  // one is the action that actually gets taken. Putting the
+                  // reverse on all ~40 settled rows cost each of them a whole
+                  // extra line for a correction that's rare — it's still
+                  // available through Edit, which has the same checkbox.
+                  secondaryAction={s.status === 'pending' ? (
                     <button
                       type="button"
-                      onClick={() => onUpdateSaleStatus(s.id, s.status === 'pending' ? 'paid' : 'pending')}
-                      className="text-xs px-2 py-1 rounded-md font-medium whitespace-nowrap"
-                      style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+                      onClick={() => onUpdateSaleStatus(s.id, 'paid')}
+                      className="eggy-btn eggy-btn-accent eggy-focus text-xs px-3 py-1.5 whitespace-nowrap"
+                      style={{ fontFamily: FONT_BODY }}
                     >
-                      {s.status === 'pending' ? 'Mark Paid' : 'Mark Pending'}
+                      Mark Paid
                     </button>
-                  }
+                  ) : null}
                   confirming={confirmId === s.id}
                   removing={removingId === s.id}
                   onEditClick={() => setEditingId(s.id)}
@@ -1295,7 +1510,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
           <EmptyRecords text="No expenses recorded yet." />
         ) : (
           <div className="space-y-2">
-            {sortedExpenses.map((e) => (
+            {sortedExpenses.map((e, i) => (
               editingId === e.id ? (
                 <EditExpenseForm
                   key={e.id}
@@ -1306,6 +1521,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
               ) : (
                 <RecordRow
                   key={e.id}
+                  delay={rowDelay(i)}
                   title={`${e.item} · ${e.quantity}x`}
                   subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
                   description={e.description}
@@ -1328,9 +1544,10 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
           <EmptyRecords text="No harvests recorded yet." />
         ) : (
           <div className="space-y-2">
-            {sortedHarvests.map((h) => (
+            {sortedHarvests.map((h, i) => (
               <RecordRow
                 key={h.id}
+                delay={rowDelay(i)}
                 title={`${h.harvested} eggs harvested`}
                 subtitle={`${formatDateDisplay(h.date)} · ${h.rejected} rejected`}
                 amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
@@ -1349,15 +1566,19 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
 }
 
 function TabBar({ tab, setTab }) {
+  // Short labels: five cells across a 390px phone gives each ~78px, and the
+  // old "Add Expense"/"Add Harvest" ran into each other with no gap. The
+  // icon already carries the "add" sense, so the noun alone is enough — the
+  // full phrasing stays on aria-label for screen readers.
   const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'addSale', label: 'Add Sale', icon: Plus },
-    { id: 'addExpense', label: 'Add Expense', icon: Wallet },
-    { id: 'addHarvest', label: 'Add Harvest', icon: Egg },
-    { id: 'records', label: 'Records', icon: ClipboardList },
+    { id: 'dashboard', label: 'Home', title: 'Dashboard', icon: LayoutDashboard },
+    { id: 'addSale', label: 'Sale', title: 'Add Sale', icon: Plus },
+    { id: 'addExpense', label: 'Expense', title: 'Add Expense', icon: Wallet },
+    { id: 'addHarvest', label: 'Harvest', title: 'Add Harvest', icon: Egg },
+    { id: 'records', label: 'Records', title: 'Records', icon: ClipboardList },
   ];
   return (
-    <nav className="fixed bottom-0 left-0 right-0 shadow-lg" style={{ backgroundColor: COLORS.card, borderTop: `1px solid ${COLORS.cardBorder}` }}>
+    <nav className="eggy-tabbar fixed bottom-0 left-0 right-0 z-20">
       <div className="max-w-4xl mx-auto grid grid-cols-5">
         {tabs.map((t) => {
           const Icon = t.icon;
@@ -1367,11 +1588,18 @@ function TabBar({ tab, setTab }) {
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className="flex flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors"
-              style={{ color: active ? COLORS.barnwood : COLORS.muted, fontFamily: FONT_BODY }}
+              aria-label={t.title}
+              aria-current={active ? 'page' : undefined}
+              // The active tab gets a tinted pill behind its icon that lifts
+              // slightly — a clearer, more physical "you are here" than a
+              // colour change alone.
+              className={`eggy-tab eggy-focus flex flex-col items-center gap-1 pt-2 pb-2.5 px-1 text-[11px] font-medium ${active ? 'is-active' : ''}`}
+              style={{ fontFamily: FONT_BODY }}
             >
-              <Icon size={19} />
-              {t.label}
+              <span className="eggy-tab-icon flex items-center justify-center">
+                <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+              </span>
+              <span className="truncate max-w-full">{t.label}</span>
             </button>
           );
         })}
@@ -1690,10 +1918,36 @@ export default function EggFarmDashboard({ username, onLogout }) {
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [sales, expenses, harvests]);
 
+  // A skeleton of the real layout rather than a lone spinner: it shows the
+  // shape of what's coming, so the first paint doesn't jump when data lands.
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: COLORS.paper }}>
-        <Loader2 className="animate-spin" size={32} style={{ color: COLORS.barnwood }} />
+      <div className="min-h-screen pb-24" style={{ backgroundColor: COLORS.paper, fontFamily: FONT_BODY }}>
+        <Header username={username} />
+        <main className="max-w-4xl mx-auto px-4 pt-4 space-y-3">
+          <div className="eggy-card p-5">
+            <div className="flex items-center gap-4">
+              <div className="eggy-skeleton rounded-full" style={{ width: 54, height: 54 }} />
+              <div className="flex-1">
+                <div className="eggy-skeleton h-3 w-24 mb-3" />
+                <div className="eggy-skeleton h-8 w-44" />
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="eggy-card p-4">
+                <div className="eggy-skeleton rounded-full" style={{ width: 38, height: 38 }} />
+                <div className="eggy-skeleton h-2.5 w-16 mt-4" />
+                <div className="eggy-skeleton h-5 w-24 mt-2" />
+              </div>
+            ))}
+          </div>
+          <div className="eggy-card p-5">
+            <div className="eggy-skeleton h-4 w-40 mb-4" />
+            <div className="eggy-skeleton h-[200px] w-full" />
+          </div>
+        </main>
       </div>
     );
   }
