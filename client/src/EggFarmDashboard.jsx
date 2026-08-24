@@ -6,7 +6,7 @@ import {
 import {
   DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
   LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff, LogOut,
-  CheckCircle2,
+  CheckCircle2, Pencil,
 } from 'lucide-react';
 import * as api from './lib/api';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle } from './lib/theme';
@@ -628,6 +628,7 @@ function AddSaleForm({ onSubmit }) {
   const [perUnitPrice, setPerUnitPrice] = useState('');
   const [totalPrice, setTotalPrice] = useState('');
   const [isPending, setIsPending] = useState(false);
+  const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -664,12 +665,13 @@ function AddSaleForm({ onSubmit }) {
     const pricePerEgg = Number(perUnitPrice);
     if (!perUnitPrice || pricePerEgg <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid' });
+    onSubmit({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || undefined });
     setFormError('');
     setTrays('');
     setPcs('');
     setPerUnitPrice('');
     setTotalPrice('');
+    setDescription('');
     setSuccess(true);
   }
 
@@ -697,6 +699,9 @@ function AddSaleForm({ onSubmit }) {
         />
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+        </Field>
+        <Field label="Description (optional)">
+          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
         </Field>
         <label className="flex items-start gap-2 cursor-pointer">
           <input
@@ -735,6 +740,7 @@ function AddExpenseForm({ onSubmit }) {
   const [date, setDate] = useState(getTodayLocal());
   const [perUnitPrice, setPerUnitPrice] = useState('');
   const [totalPrice, setTotalPrice] = useState('');
+  const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -770,11 +776,12 @@ function AddExpenseForm({ onSubmit }) {
     const pricePerItem = Number(perUnitPrice);
     if (!perUnitPrice || pricePerItem <= 0) { setFormError('Enter a price greater than 0.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ item, quantity: q, date, price: pricePerItem });
+    onSubmit({ item, quantity: q, date, price: pricePerItem, description: description.trim() || undefined });
     setFormError('');
     setQuantity('');
     setPerUnitPrice('');
     setTotalPrice('');
+    setDescription('');
     setSuccess(true);
   }
 
@@ -805,6 +812,9 @@ function AddExpenseForm({ onSubmit }) {
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
         </Field>
+        <Field label="Description (optional)">
+          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
+        </Field>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
         {success && (
           <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
@@ -819,6 +829,217 @@ function AddExpenseForm({ onSubmit }) {
         >
           Add Expense
         </button>
+      </form>
+    </div>
+  );
+}
+
+// Edits an existing sale in place of its RecordRow. Mirrors AddSaleForm's
+// fields/validation but seeds them from the record being edited and saves
+// via onSave instead of clearing back to a blank form.
+function EditSaleForm({ sale, onSave, onCancel }) {
+  const [eggSize, setEggSize] = useState(sale.eggSize);
+  const [trays, setTrays] = useState(String(Math.floor(sale.quantity / TRAY_SIZE)));
+  const [pcs, setPcs] = useState(String(sale.quantity % TRAY_SIZE));
+  const [date, setDate] = useState(sale.date);
+  const [perUnitPrice, setPerUnitPrice] = useState(sale.pricePerEgg.toFixed(2));
+  const [totalPrice, setTotalPrice] = useState((sale.quantity * sale.pricePerEgg).toFixed(2));
+  const [isPending, setIsPending] = useState(sale.status === 'pending');
+  const [description, setDescription] = useState(sale.description || '');
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const q = trayPcsToTotal(trays, pcs) ?? 0;
+
+  function handlePerUnitChange(value) {
+    setPerUnitPrice(value);
+    if (value === '') { setTotalPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setTotalPrice((num * q).toFixed(2));
+    }
+  }
+
+  function handleTotalChange(value) {
+    setTotalPrice(value);
+    if (value === '') { setPerUnitPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setPerUnitPrice((num / q).toFixed(2));
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const quantity = trayPcsToTotal(trays, pcs);
+    if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
+    const pricePerEgg = Number(perUnitPrice);
+    if (!perUnitPrice || pricePerEgg <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    if (!date) { setFormError('Select a date.'); return; }
+    setFormError('');
+    setSaving(true);
+    await onSave({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || null });
+    setSaving(false);
+  }
+
+  return (
+    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.yolk}` }}>
+      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
+        <Pencil size={16} style={{ color: COLORS.moss }} /> Edit Sale
+      </h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Egg size">
+          <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
+            {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </Field>
+        <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
+        <TwoWayPriceField
+          label="Price"
+          quantity={q}
+          perUnit={perUnitPrice}
+          total={totalPrice}
+          onPerUnitChange={handlePerUnitChange}
+          onTotalChange={handleTotalChange}
+          perUnitCaption="Per egg"
+          totalCaption="Total sale"
+        />
+        <Field label="Date">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+        </Field>
+        <Field label="Description (optional)">
+          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
+        </Field>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isPending}
+            onChange={(e) => setIsPending(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded"
+            style={{ accentColor: COLORS.yolk }}
+          />
+          <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
+            Pending (utang) — customer took the eggs but hasn't paid yet
+          </span>
+        </label>
+        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
+            style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY, opacity: saving ? 0.7 : 1 }}
+          >
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
+            style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// Same idea as EditSaleForm, for expenses.
+function EditExpenseForm({ expense, onSave, onCancel }) {
+  const [item, setItem] = useState(expense.item);
+  const [quantity, setQuantity] = useState(String(expense.quantity));
+  const [date, setDate] = useState(expense.date);
+  const [perUnitPrice, setPerUnitPrice] = useState(expense.price.toFixed(2));
+  const [totalPrice, setTotalPrice] = useState((expense.quantity * expense.price).toFixed(2));
+  const [description, setDescription] = useState(expense.description || '');
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const q = Number(quantity) || 0;
+
+  function handlePerUnitChange(value) {
+    setPerUnitPrice(value);
+    if (value === '') { setTotalPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setTotalPrice((num * q).toFixed(2));
+    }
+  }
+
+  function handleTotalChange(value) {
+    setTotalPrice(value);
+    if (value === '') { setPerUnitPrice(''); return; }
+    const num = Number(value);
+    if (q > 0 && Number.isFinite(num) && num >= 0) {
+      setPerUnitPrice((num / q).toFixed(2));
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
+    const pricePerItem = Number(perUnitPrice);
+    if (!perUnitPrice || pricePerItem <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    if (!date) { setFormError('Select a date.'); return; }
+    setFormError('');
+    setSaving(true);
+    await onSave({ item, quantity: q, date, price: pricePerItem, description: description.trim() || null });
+    setSaving(false);
+  }
+
+  return (
+    <div className="rounded-2xl p-5 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.yolk}` }}>
+      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
+        <Pencil size={16} style={{ color: COLORS.brick }} /> Edit Expense
+      </h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Item">
+          <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
+            {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Quantity">
+          <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
+        </Field>
+        <TwoWayPriceField
+          label="Price"
+          quantity={q}
+          perUnit={perUnitPrice}
+          total={totalPrice}
+          onPerUnitChange={handlePerUnitChange}
+          onTotalChange={handleTotalChange}
+          perUnitCaption="Per item"
+          totalCaption="Total cost"
+        />
+        <Field label="Date">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+        </Field>
+        <Field label="Description (optional)">
+          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
+        </Field>
+        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
+            style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY, opacity: saving ? 0.7 : 1 }}
+          >
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="flex-1 font-semibold py-2.5 rounded-lg transition-colors"
+            style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+          >
+            Cancel
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -894,7 +1115,7 @@ function EmptyRecords({ text }) {
   );
 }
 
-function RecordRow({ title, subtitle, amount, amountColor, badge, secondaryAction, confirming, removing, onDeleteClick, onCancel }) {
+function RecordRow({ title, subtitle, description, amount, amountColor, badge, secondaryAction, confirming, removing, onEditClick, onDeleteClick, onCancel }) {
   return (
     <div
       className="rounded-xl px-4 py-3 shadow-sm flex items-center justify-between gap-3"
@@ -915,6 +1136,9 @@ function RecordRow({ title, subtitle, amount, amountColor, badge, secondaryActio
           {badge}
         </div>
         <p className="text-xs truncate" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{subtitle}</p>
+        {description && (
+          <p className="text-xs truncate italic" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{description}</p>
+        )}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {!confirming && secondaryAction}
@@ -925,19 +1149,27 @@ function RecordRow({ title, subtitle, amount, amountColor, badge, secondaryActio
             <button type="button" onClick={onCancel} className="text-xs px-2 py-1 rounded-md font-medium" style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft }}>Cancel</button>
           </div>
         ) : (
-          <button type="button" onClick={onDeleteClick} className="p-1" style={{ color: COLORS.muted }}>
-            <Trash2 size={16} />
-          </button>
+          <>
+            {onEditClick && (
+              <button type="button" onClick={onEditClick} className="p-1" style={{ color: COLORS.muted }}>
+                <Pencil size={16} />
+              </button>
+            )}
+            <button type="button" onClick={onDeleteClick} className="p-1" style={{ color: COLORS.muted }}>
+              <Trash2 size={16} />
+            </button>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest, onUpdateSaleStatus }) {
+function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest, onUpdateSaleStatus, onUpdateSale, onUpdateExpense }) {
   const [subTab, setSubTab] = useState('sales');
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
 
   // Most-recently-added first — not the sale/expense/harvest date, which is
   // user-entered and can be backdated, so it doesn't reflect entry order.
@@ -947,6 +1179,9 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
   const sortedHarvests = useMemo(() => [...harvests].sort(byRecentlyAdded), [harvests]);
 
   function handleDeleteClick(id) {
+    // Deleting mid-edit would race the optimistic edit save against the
+    // removal, so back out of edit mode first.
+    setEditingId(null);
     if (confirmId === id) {
       setConfirmId(null);
       // Play the collapse animation first, then actually remove the row —
@@ -965,12 +1200,22 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
     }
   }
 
+  async function handleSaveSale(id, fields) {
+    await onUpdateSale(id, fields);
+    setEditingId(null);
+  }
+
+  async function handleSaveExpense(id, fields) {
+    await onUpdateExpense(id, fields);
+    setEditingId(null);
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex rounded-lg p-1 shadow-sm" style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}>
         <button
           type="button"
-          onClick={() => { setSubTab('sales'); setConfirmId(null); }}
+          onClick={() => { setSubTab('sales'); setConfirmId(null); setEditingId(null); }}
           className="flex-1 py-2 text-sm font-medium rounded-md"
           style={{ backgroundColor: subTab === 'sales' ? COLORS.barnwood : 'transparent', color: subTab === 'sales' ? '#FFF' : COLORS.inkSoft, fontFamily: FONT_BODY }}
         >
@@ -978,7 +1223,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         </button>
         <button
           type="button"
-          onClick={() => { setSubTab('expenses'); setConfirmId(null); }}
+          onClick={() => { setSubTab('expenses'); setConfirmId(null); setEditingId(null); }}
           className="flex-1 py-2 text-sm font-medium rounded-md"
           style={{ backgroundColor: subTab === 'expenses' ? COLORS.barnwood : 'transparent', color: subTab === 'expenses' ? '#FFF' : COLORS.inkSoft, fontFamily: FONT_BODY }}
         >
@@ -986,7 +1231,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         </button>
         <button
           type="button"
-          onClick={() => { setSubTab('harvests'); setConfirmId(null); }}
+          onClick={() => { setSubTab('harvests'); setConfirmId(null); setEditingId(null); }}
           className="flex-1 py-2 text-sm font-medium rounded-md"
           style={{ backgroundColor: subTab === 'harvests' ? COLORS.barnwood : 'transparent', color: subTab === 'harvests' ? '#FFF' : COLORS.inkSoft, fontFamily: FONT_BODY }}
         >
@@ -1000,35 +1245,46 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         ) : (
           <div className="space-y-2">
             {sortedSales.map((s) => (
-              <RecordRow
-                key={s.id}
-                title={`${s.eggSize} · ${s.quantity} eggs`}
-                subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
-                amount={formatCurrency(s.quantity * s.pricePerEgg)}
-                amountColor={s.status === 'pending' ? COLORS.muted : COLORS.moss}
-                badge={s.status === 'pending' && (
-                  <span
-                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                    style={{ backgroundColor: COLORS.yolk, color: '#FFF', fontFamily: FONT_BODY }}
-                  >
-                    PENDING
-                  </span>
-                )}
-                secondaryAction={
-                  <button
-                    type="button"
-                    onClick={() => onUpdateSaleStatus(s.id, s.status === 'pending' ? 'paid' : 'pending')}
-                    className="text-xs px-2 py-1 rounded-md font-medium whitespace-nowrap"
-                    style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
-                  >
-                    {s.status === 'pending' ? 'Mark Paid' : 'Mark Pending'}
-                  </button>
-                }
-                confirming={confirmId === s.id}
-                removing={removingId === s.id}
-                onDeleteClick={() => handleDeleteClick(s.id)}
-                onCancel={() => setConfirmId(null)}
-              />
+              editingId === s.id ? (
+                <EditSaleForm
+                  key={s.id}
+                  sale={s}
+                  onSave={(fields) => handleSaveSale(s.id, fields)}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : (
+                <RecordRow
+                  key={s.id}
+                  title={`${s.eggSize} · ${s.quantity} eggs`}
+                  subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
+                  description={s.description}
+                  amount={formatCurrency(s.quantity * s.pricePerEgg)}
+                  amountColor={s.status === 'pending' ? COLORS.muted : COLORS.moss}
+                  badge={s.status === 'pending' && (
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
+                      style={{ backgroundColor: COLORS.yolk, color: '#FFF', fontFamily: FONT_BODY }}
+                    >
+                      PENDING
+                    </span>
+                  )}
+                  secondaryAction={
+                    <button
+                      type="button"
+                      onClick={() => onUpdateSaleStatus(s.id, s.status === 'pending' ? 'paid' : 'pending')}
+                      className="text-xs px-2 py-1 rounded-md font-medium whitespace-nowrap"
+                      style={{ backgroundColor: COLORS.paper, color: COLORS.inkSoft, fontFamily: FONT_BODY }}
+                    >
+                      {s.status === 'pending' ? 'Mark Paid' : 'Mark Pending'}
+                    </button>
+                  }
+                  confirming={confirmId === s.id}
+                  removing={removingId === s.id}
+                  onEditClick={() => setEditingId(s.id)}
+                  onDeleteClick={() => handleDeleteClick(s.id)}
+                  onCancel={() => setConfirmId(null)}
+                />
+              )
             ))}
           </div>
         )
@@ -1040,17 +1296,28 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         ) : (
           <div className="space-y-2">
             {sortedExpenses.map((e) => (
-              <RecordRow
-                key={e.id}
-                title={`${e.item} · ${e.quantity}x`}
-                subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
-                amount={formatCurrency(e.quantity * e.price)}
-                amountColor={COLORS.brick}
-                confirming={confirmId === e.id}
-                removing={removingId === e.id}
-                onDeleteClick={() => handleDeleteClick(e.id)}
-                onCancel={() => setConfirmId(null)}
-              />
+              editingId === e.id ? (
+                <EditExpenseForm
+                  key={e.id}
+                  expense={e}
+                  onSave={(fields) => handleSaveExpense(e.id, fields)}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : (
+                <RecordRow
+                  key={e.id}
+                  title={`${e.item} · ${e.quantity}x`}
+                  subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
+                  description={e.description}
+                  amount={formatCurrency(e.quantity * e.price)}
+                  amountColor={COLORS.brick}
+                  confirming={confirmId === e.id}
+                  removing={removingId === e.id}
+                  onEditClick={() => setEditingId(e.id)}
+                  onDeleteClick={() => handleDeleteClick(e.id)}
+                  onCancel={() => setConfirmId(null)}
+                />
+              )
             ))}
           </div>
         )
@@ -1287,6 +1554,25 @@ export default function EggFarmDashboard({ username, onLogout }) {
     }
   }, []);
 
+  // Full-record edit (all fields at once), same optimistic-then-reconcile
+  // shape as updateSaleStatus above but reverting to the whole previous
+  // record on failure rather than just one field.
+  const updateSale = useCallback(async (id, fields) => {
+    let previous;
+    setSales((prev) => prev.map((s) => {
+      if (s.id !== id) return s;
+      previous = s;
+      return { ...s, ...fields };
+    }));
+    try {
+      const sale = await api.updateSale(id, fields);
+      setSales((prev) => prev.map((s) => (s.id === id ? sale : s)));
+    } catch (e) {
+      setSales((prev) => prev.map((s) => (s.id === id ? previous : s)));
+      setErrorMsg('Could not update this sale. Please try again.');
+    }
+  }, []);
+
   // Same optimistic-then-reconcile approach as addSale above.
   const addExpense = useCallback(async (entry) => {
     const tempId = crypto.randomUUID();
@@ -1306,6 +1592,23 @@ export default function EggFarmDashboard({ username, onLogout }) {
       setExpenses((prev) => prev.filter((e) => e.id !== id));
     } catch (e) {
       setErrorMsg('Could not delete this expense. Please try again.');
+    }
+  }, []);
+
+  // Full-record edit for expenses — same shape as updateSale above.
+  const updateExpense = useCallback(async (id, fields) => {
+    let previous;
+    setExpenses((prev) => prev.map((x) => {
+      if (x.id !== id) return x;
+      previous = x;
+      return { ...x, ...fields };
+    }));
+    try {
+      const expense = await api.updateExpense(id, fields);
+      setExpenses((prev) => prev.map((x) => (x.id === id ? expense : x)));
+    } catch (e) {
+      setExpenses((prev) => prev.map((x) => (x.id === id ? previous : x)));
+      setErrorMsg('Could not update this expense. Please try again.');
     }
   }, []);
 
@@ -1442,6 +1745,8 @@ export default function EggFarmDashboard({ username, onLogout }) {
             onDeleteExpense={deleteExpense}
             onDeleteHarvest={deleteHarvest}
             onUpdateSaleStatus={updateSaleStatus}
+            onUpdateSale={updateSale}
+            onUpdateExpense={updateExpense}
           />
         )}
       </main>

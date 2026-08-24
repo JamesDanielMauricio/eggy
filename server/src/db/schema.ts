@@ -36,6 +36,8 @@ export const sales = pgTable(
     // Defaults to "paid" so every existing row and any API caller that
     // omits the field keeps behaving like a normal, already-settled sale.
     status: text("status").notNull().default("paid"),
+    // Free-text note, e.g. "sold to Aling Nena" — always optional.
+    description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [
@@ -46,6 +48,7 @@ export const sales = pgTable(
     check("sales_quantity_check", sql`${table.quantity} > 0`),
     check("sales_price_per_egg_check", sql`${table.pricePerEgg} >= 0`),
     check("sales_status_check", sql`${table.status} in ('paid','pending')`),
+    check("sales_description_check", sql`char_length(${table.description}) <= 500`),
   ]
 );
 
@@ -57,6 +60,8 @@ export const expenses = pgTable(
     quantity: integer("quantity").notNull(),
     price: numeric("price", { precision: 10, scale: 2 }).notNull(),
     expenseDate: date("expense_date").notNull(),
+    // Free-text note, e.g. "50kg layer feed from Cruz Agrivet" — always optional.
+    description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   },
   (table) => [
@@ -66,6 +71,7 @@ export const expenses = pgTable(
     ),
     check("expenses_quantity_check", sql`${table.quantity} > 0`),
     check("expenses_price_check", sql`${table.price} >= 0`),
+    check("expenses_description_check", sql`char_length(${table.description}) <= 500`),
   ]
 );
 

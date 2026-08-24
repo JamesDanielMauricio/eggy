@@ -41,11 +41,11 @@ export async function getCurrentUser() {
 // The API returns Drizzle's column names (saleDate, numeric fields as
 // strings); the component works with `date` and plain JS numbers.
 function fromSaleRow(row) {
-  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), status: row.status, createdAt: row.createdAt };
+  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), status: row.status, description: row.description, createdAt: row.createdAt };
 }
 
 function fromExpenseRow(row) {
-  return { id: row.id, item: row.item, quantity: row.quantity, date: row.expenseDate, price: Number(row.price), createdAt: row.createdAt };
+  return { id: row.id, item: row.item, quantity: row.quantity, date: row.expenseDate, price: Number(row.price), description: row.description, createdAt: row.createdAt };
 }
 
 // harvested/rejected are integer columns, so unlike price/pricePerEgg they
@@ -59,10 +59,10 @@ export async function listSales() {
   return rows.map(fromSaleRow);
 }
 
-export async function createSale({ eggSize, quantity, pricePerEgg, date, status }) {
+export async function createSale({ eggSize, quantity, pricePerEgg, date, status, description }) {
   const row = await request('/api/sales', {
     method: 'POST',
-    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date, status }),
+    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date, status, description }),
   });
   return fromSaleRow(row);
 }
@@ -71,6 +71,14 @@ export async function updateSaleStatus(id, status) {
   const row = await request(`/api/sales/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
+  });
+  return fromSaleRow(row);
+}
+
+export async function updateSale(id, { eggSize, quantity, pricePerEgg, date, status, description }) {
+  const row = await request(`/api/sales/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date, status, description }),
   });
   return fromSaleRow(row);
 }
@@ -84,10 +92,18 @@ export async function listExpenses() {
   return rows.map(fromExpenseRow);
 }
 
-export async function createExpense({ item, quantity, price, date }) {
+export async function createExpense({ item, quantity, price, date, description }) {
   const row = await request('/api/expenses', {
     method: 'POST',
-    body: JSON.stringify({ item, quantity, price, date }),
+    body: JSON.stringify({ item, quantity, price, date, description }),
+  });
+  return fromExpenseRow(row);
+}
+
+export async function updateExpense(id, { item, quantity, price, date, description }) {
+  const row = await request(`/api/expenses/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ item, quantity, price, date, description }),
   });
   return fromExpenseRow(row);
 }

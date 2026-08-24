@@ -25,3 +25,10 @@ export function toDateOnly(value: string): string {
 }
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// description is always optional, so `undefined` passes — this only rejects
+// a description that was actually sent but isn't a string within the
+// `char_length(...) <= 500` CHECK constraint on the sales/expenses tables.
+export function isValidOptionalDescription(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === "string" && value.length <= 500);
+}

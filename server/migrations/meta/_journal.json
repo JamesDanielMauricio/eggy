@@ -36,6 +36,13 @@
       "when": 1786077173695,
       "tag": "0004_gifted_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787555198778,
+      "tag": "0005_tough_magdalene",
+      "breakpoints": true
     }
   ]
 }
