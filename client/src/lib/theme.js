@@ -65,7 +65,12 @@ export const FONT_BODY = "'Work Sans', -apple-system, BlinkMacSystemFont, sans-s
 
 // `eggy-input` carries the focus ring and transition; the colour/font come
 // from inputStyle so a caller can still override them per field.
-export const inputClasses = 'eggy-input w-full text-sm';
+//
+// text-base (16px), not text-sm: iOS Safari auto-zooms the page on focus for
+// any input rendering below 16px, and there's no way to opt out of that
+// short of disabling pinch-zoom app-wide (an accessibility regression). 16px
+// is the smallest size that keeps every input/select in the app zoom-free.
+export const inputClasses = 'eggy-input w-full text-base';
 export const inputStyle = {
   backgroundColor: '#FFFFFF',
   border: `1px solid ${COLORS.inputBorder}`,
