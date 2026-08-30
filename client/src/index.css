@@ -186,6 +186,20 @@ body {
   color: #B8AF9C;
 }
 
+/* iOS renders date/week/month inputs as a native widget with its own
+   internal day/month/year layout, which can ignore our `width: 100%` and
+   render wider than the box we drew — spilling past the field's own border
+   instead of matching the plain text inputs beside it. Turning off the
+   native appearance makes Safari treat it as an ordinary styled box that
+   respects our CSS width, without affecting the tap-to-open picker itself. */
+.eggy-input[type="date"],
+.eggy-input[type="week"],
+.eggy-input[type="month"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+}
+
 /* Visible ring for keyboard users only, so mouse clicks don't leave a ring
    stuck on the button afterwards. */
 .eggy-focus:focus-visible {
