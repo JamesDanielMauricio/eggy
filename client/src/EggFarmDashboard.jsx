@@ -6,7 +6,7 @@ import {
 import {
   DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
   LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff, LogOut,
-  CheckCircle2, Pencil,
+  CheckCircle2, Pencil, Search, X,
 } from 'lucide-react';
 import * as api from './lib/api';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle, ELEVATION, NUM_TABULAR } from './lib/theme';
@@ -1376,6 +1376,8 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [saleSearch, setSaleSearch] = useState('');
+  const [saleStatusFilter, setSaleStatusFilter] = useState('all');
 
   // Most-recently-added first — not the sale/expense/harvest date, which is
   // user-entered and can be backdated, so it doesn't reflect entry order.
@@ -1383,6 +1385,21 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
   const sortedSales = useMemo(() => [...sales].sort(byRecentlyAdded), [sales]);
   const sortedExpenses = useMemo(() => [...expenses].sort(byRecentlyAdded), [expenses]);
   const sortedHarvests = useMemo(() => [...harvests].sort(byRecentlyAdded), [harvests]);
+
+  // Records saved before the status field existed (or a sale marked as
+  // settled) come through with `status` unset, not `'paid'` — treat unset
+  // the same as paid, matching the `paidSales` split used on the dashboard.
+  const filteredSales = useMemo(() => {
+    const query = saleSearch.trim().toLowerCase();
+    return sortedSales.filter((s) => {
+      const isPending = s.status === 'pending';
+      const matchesStatus =
+        saleStatusFilter === 'all' ||
+        (saleStatusFilter === 'pending' ? isPending : !isPending);
+      const matchesSearch = query === '' || (s.description || '').toLowerCase().includes(query);
+      return matchesStatus && matchesSearch;
+    });
+  }, [sortedSales, saleSearch, saleStatusFilter]);
 
   function handleDeleteClick(id) {
     // Deleting mid-edit would race the optimistic edit save against the
@@ -1443,12 +1460,53 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         })}
       </div>
 
+      {subTab === 'sales' && sales.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[160px]">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: COLORS.muted }} />
+            <input
+              type="text"
+              value={saleSearch}
+              onChange={(e) => setSaleSearch(e.target.value)}
+              placeholder="Search description…"
+              aria-label="Search sales by description"
+              className={inputClasses}
+              style={{ ...inputStyle, paddingLeft: 36, paddingRight: saleSearch ? 36 : undefined }}
+            />
+            {saleSearch && (
+              <button
+                type="button"
+                onClick={() => setSaleSearch('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 eggy-icon-btn eggy-focus"
+                style={{ padding: 4 }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <select
+            value={saleStatusFilter}
+            onChange={(e) => setSaleStatusFilter(e.target.value)}
+            aria-label="Filter sales by status"
+            className={inputClasses}
+            style={{ ...inputStyle, width: 'auto' }}
+          >
+            <option value="all">All statuses</option>
+            <option value="paid">Paid</option>
+            <option value="pending">Pending</option>
+          </select>
+        </div>
+      )}
+
       {subTab === 'sales' && (
         sortedSales.length === 0 ? (
           <EmptyRecords text="No sales recorded yet." />
+        ) : filteredSales.length === 0 ? (
+          <EmptyRecords text="No sales match your search." />
         ) : (
           <div className="space-y-2">
-            {sortedSales.map((s, i) => (
+            {filteredSales.map((s, i) => (
               editingId === s.id ? (
                 <EditSaleForm
                   key={s.id}
