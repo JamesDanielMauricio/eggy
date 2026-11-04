@@ -21,7 +21,25 @@ npm run db:generate
 npm run db:migrate
 ```
 
+## Dashboard reads
+
+The dashboard uses authenticated `GET /api/ledger` to read sales, expenses,
+and harvests in one PostgreSQL statement and one HTTP request. The response
+keeps the same record fields as the individual collection endpoints, which
+remain available. It returns complete collections so all-time totals stay
+accurate; sorting for the Records screen happens in the client.
+
+The client reuses an in-flight read and avoids repeating a successful read
+within 30 seconds when returning to the app. Failed reads have a Retry
+action. Refresh responses cannot overwrite collections changed by a save
+or deletion while that read was in flight.
+
 ## Scripts
+
+Run `npm test` for the API regression checks. They build the server and use
+Node's experimental module mocks (tested on Node 24), without connecting to
+the configured farm database. Coverage includes nullable descriptions,
+paid/pending edits, validation failures, and the authenticated ledger read.
 
 | Command             | Purpose                                      |
 | -------------------- | --------------------------------------------- |

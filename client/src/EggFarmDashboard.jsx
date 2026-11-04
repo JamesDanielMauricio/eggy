@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { LayoutGroup, motion, useReducedMotion } from 'motion/react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/react';
 import { AnimatedNumber, SaveFeedback, ScreenTransition, SegmentedControl } from './components/MotionUI';
 import { SPRING } from './lib/motion';
 import {
@@ -8,10 +8,11 @@ import {
 } from 'recharts';
 import {
   DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
-  LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff, LogOut,
+  LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, LogOut,
   Pencil, Search, X,
 } from 'lucide-react';
 import * as api from './lib/api';
+import { useLedger } from './lib/useLedger';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle, ELEVATION, NUM_TABULAR } from './lib/theme';
 
 const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large', 'Jumbo', 'Reject'];
@@ -335,14 +336,18 @@ function Header({ username, onLogout }) {
   );
 }
 
-function ErrorBanner({ message, onClose }) {
+function ErrorBanner({ message, onClose, onRetry }) {
   return (
     <div
+      role="alert"
       className="text-sm rounded-lg px-3 py-2 mb-4 flex items-center justify-between"
       style={{ backgroundColor: '#F7E6E1', border: `1px solid ${COLORS.brick}55`, color: COLORS.brick, fontFamily: FONT_BODY }}
     >
       <span>{message}</span>
-      <button type="button" onClick={onClose} className="font-bold px-2">×</button>
+      <div className="flex shrink-0 items-center gap-2">
+        {onRetry && <button type="button" onClick={onRetry} className="eggy-btn eggy-btn-quiet eggy-focus px-3 py-1 text-xs">Retry</button>}
+        <button type="button" onClick={onClose} aria-label="Dismiss error" className="font-bold px-2">×</button>
+      </div>
     </div>
   );
 }
@@ -787,6 +792,7 @@ function AddSaleForm({ onSubmit }) {
   const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!success) return;
@@ -814,21 +820,30 @@ function AddSaleForm({ onSubmit }) {
     }
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    if (saving) return;
     const quantity = trayPcsToTotal(trays, pcs);
     if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
     const pricePerEgg = Number(perUnitPrice);
-    if (!perUnitPrice || pricePerEgg <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    if (perUnitPrice === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || undefined });
     setFormError('');
-    setTrays('');
-    setPcs('');
-    setPerUnitPrice('');
-    setTotalPrice('');
-    setDescription('');
-    setSuccess(true);
+    setSuccess(false);
+    setSaving(true);
+    try {
+      await onSubmit({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || undefined });
+      setTrays('');
+      setPcs('');
+      setPerUnitPrice('');
+      setTotalPrice('');
+      setDescription('');
+      setSuccess(true);
+    } catch (err) {
+      setFormError(api.errorMessage(err, 'Could not save your sale. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -836,50 +851,52 @@ function AddSaleForm({ onSubmit }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Plus size={16} style={{ color: COLORS.moss }} /> Record a Sale
       </h2>
-      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
-        <Field label="Egg size">
-          <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
-            {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </Field>
-        <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
-        <TwoWayPriceField
-          label="Price"
-          quantity={q}
-          perUnit={perUnitPrice}
-          total={totalPrice}
-          onPerUnitChange={handlePerUnitChange}
-          onTotalChange={handleTotalChange}
-          perUnitCaption="Per egg"
-          totalCaption="Total sale"
-        />
-        <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-        </Field>
-        <Field label="Description (optional)">
-          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
-        </Field>
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isPending}
-            onChange={(e) => setIsPending(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded"
-            style={{ accentColor: COLORS.yolk }}
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
+          <Field label="Egg size">
+            <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
+              {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
+          <TwoWayPriceField
+            label="Price"
+            quantity={q}
+            perUnit={perUnitPrice}
+            total={totalPrice}
+            onPerUnitChange={handlePerUnitChange}
+            onTotalChange={handleTotalChange}
+            perUnitCaption="Per egg"
+            totalCaption="Total sale"
           />
-          <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-            Pending (utang) — customer took the eggs but hasn't paid yet
-          </span>
-        </label>
-        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        <SaveFeedback visible={success}>{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</SaveFeedback>
-        <button
-          type="submit"
-          className={`eggy-btn eggy-focus w-full py-3 text-sm ${isPending ? 'eggy-btn-accent' : 'eggy-btn-primary'}`}
-          style={{ fontFamily: FONT_BODY }}
-        >
-          {isPending ? 'Add Pending Sale' : 'Add Sale'}
-        </button>
+          <Field label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+          </Field>
+          <Field label="Description (optional)">
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
+          </Field>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPending}
+              onChange={(e) => setIsPending(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded"
+              style={{ accentColor: COLORS.yolk }}
+            />
+            <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
+              Pending (utang) — customer took the eggs but hasn't paid yet
+            </span>
+          </label>
+          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+          <SaveFeedback visible={success}>{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</SaveFeedback>
+          <button
+            type="submit"
+            className={`eggy-btn eggy-focus w-full py-3 text-sm ${isPending ? 'eggy-btn-accent' : 'eggy-btn-primary'}`}
+            style={{ fontFamily: FONT_BODY }}
+          >
+            {saving ? 'Saving...' : isPending ? 'Add Pending Sale' : 'Add Sale'}
+          </button>
+        </fieldset>
       </form>
     </div>
   );
@@ -894,6 +911,7 @@ function AddExpenseForm({ onSubmit }) {
   const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!success) return;
@@ -921,19 +939,28 @@ function AddExpenseForm({ onSubmit }) {
     }
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
+    if (saving) return;
+    if (!Number.isSafeInteger(q) || q <= 0) { setFormError('Enter a whole-number quantity greater than 0.'); return; }
     const pricePerItem = Number(perUnitPrice);
-    if (!perUnitPrice || pricePerItem <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    if (perUnitPrice === '' || !Number.isFinite(pricePerItem) || pricePerItem < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ item, quantity: q, date, price: pricePerItem, description: description.trim() || undefined });
     setFormError('');
-    setQuantity('');
-    setPerUnitPrice('');
-    setTotalPrice('');
-    setDescription('');
-    setSuccess(true);
+    setSuccess(false);
+    setSaving(true);
+    try {
+      await onSubmit({ item, quantity: q, date, price: pricePerItem, description: description.trim() || undefined });
+      setQuantity('');
+      setPerUnitPrice('');
+      setTotalPrice('');
+      setDescription('');
+      setSuccess(true);
+    } catch (err) {
+      setFormError(api.errorMessage(err, 'Could not save your expense. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -941,40 +968,42 @@ function AddExpenseForm({ onSubmit }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Wallet size={16} style={{ color: COLORS.brick }} /> Record an Expense
       </h2>
-      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
-        <Field label="Item">
-          <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
-            {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </Field>
-        <Field label="Quantity">
-          <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
-        </Field>
-        <TwoWayPriceField
-          label="Price"
-          quantity={q}
-          perUnit={perUnitPrice}
-          total={totalPrice}
-          onPerUnitChange={handlePerUnitChange}
-          onTotalChange={handleTotalChange}
-          perUnitCaption="Per item"
-          totalCaption="Total cost"
-        />
-        <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-        </Field>
-        <Field label="Description (optional)">
-          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
-        </Field>
-        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        <SaveFeedback visible={success}>Expense recorded.</SaveFeedback>
-        <button
-          type="submit"
-          className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
-          style={{ fontFamily: FONT_BODY }}
-        >
-          Add Expense
-        </button>
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
+          <Field label="Item">
+            <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
+              {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Quantity">
+            <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
+          </Field>
+          <TwoWayPriceField
+            label="Price"
+            quantity={q}
+            perUnit={perUnitPrice}
+            total={totalPrice}
+            onPerUnitChange={handlePerUnitChange}
+            onTotalChange={handleTotalChange}
+            perUnitCaption="Per item"
+            totalCaption="Total cost"
+          />
+          <Field label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+          </Field>
+          <Field label="Description (optional)">
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
+          </Field>
+          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+          <SaveFeedback visible={success}>Expense recorded.</SaveFeedback>
+          <button
+            type="submit"
+            className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
+            style={{ fontFamily: FONT_BODY }}
+          >
+            {saving ? 'Saving...' : 'Add Expense'}
+          </button>
+        </fieldset>
       </form>
     </div>
   );
@@ -1017,15 +1046,21 @@ function EditSaleForm({ sale, onSave, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (saving) return;
     const quantity = trayPcsToTotal(trays, pcs);
     if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
     const pricePerEgg = Number(perUnitPrice);
-    if (!perUnitPrice || pricePerEgg <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    if (perUnitPrice === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
     setFormError('');
     setSaving(true);
-    await onSave({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || null });
-    setSaving(false);
+    try {
+      await onSave({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || null });
+    } catch (err) {
+      setFormError(api.errorMessage(err, 'Could not update this sale. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1033,61 +1068,63 @@ function EditSaleForm({ sale, onSave, onCancel }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Pencil size={16} style={{ color: COLORS.moss }} /> Edit Sale
       </h2>
-      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
-        <Field label="Egg size">
-          <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
-            {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </Field>
-        <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
-        <TwoWayPriceField
-          label="Price"
-          quantity={q}
-          perUnit={perUnitPrice}
-          total={totalPrice}
-          onPerUnitChange={handlePerUnitChange}
-          onTotalChange={handleTotalChange}
-          perUnitCaption="Per egg"
-          totalCaption="Total sale"
-        />
-        <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-        </Field>
-        <Field label="Description (optional)">
-          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
-        </Field>
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isPending}
-            onChange={(e) => setIsPending(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded"
-            style={{ accentColor: COLORS.yolk }}
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
+          <Field label="Egg size">
+            <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
+              {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
+          <TwoWayPriceField
+            label="Price"
+            quantity={q}
+            perUnit={perUnitPrice}
+            total={totalPrice}
+            onPerUnitChange={handlePerUnitChange}
+            onTotalChange={handleTotalChange}
+            perUnitCaption="Per egg"
+            totalCaption="Total sale"
           />
-          <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-            Pending (utang) — customer took the eggs but hasn't paid yet
-          </span>
-        </label>
-        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={saving}
-            className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
-            style={{ fontFamily: FONT_BODY }}
-          >
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saving}
-            className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
-            style={{ fontFamily: FONT_BODY }}
-          >
-            Cancel
-          </button>
-        </div>
+          <Field label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+          </Field>
+          <Field label="Description (optional)">
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
+          </Field>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPending}
+              onChange={(e) => setIsPending(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded"
+              style={{ accentColor: COLORS.yolk }}
+            />
+            <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
+              Pending (utang) — customer took the eggs but hasn't paid yet
+            </span>
+          </label>
+          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
+              style={{ fontFamily: FONT_BODY }}
+            >
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
+              style={{ fontFamily: FONT_BODY }}
+            >
+              Cancel
+            </button>
+          </div>
+        </fieldset>
       </form>
     </div>
   );
@@ -1126,14 +1163,20 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!quantity || q <= 0) { setFormError('Enter a quantity greater than 0.'); return; }
+    if (saving) return;
+    if (!Number.isSafeInteger(q) || q <= 0) { setFormError('Enter a whole-number quantity greater than 0.'); return; }
     const pricePerItem = Number(perUnitPrice);
-    if (!perUnitPrice || pricePerItem <= 0) { setFormError('Enter a price greater than 0.'); return; }
+    if (perUnitPrice === '' || !Number.isFinite(pricePerItem) || pricePerItem < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
     setFormError('');
     setSaving(true);
-    await onSave({ item, quantity: q, date, price: pricePerItem, description: description.trim() || null });
-    setSaving(false);
+    try {
+      await onSave({ item, quantity: q, date, price: pricePerItem, description: description.trim() || null });
+    } catch (err) {
+      setFormError(api.errorMessage(err, 'Could not update this expense. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1141,51 +1184,53 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Pencil size={16} style={{ color: COLORS.brick }} /> Edit Expense
       </h2>
-      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
-        <Field label="Item">
-          <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
-            {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </Field>
-        <Field label="Quantity">
-          <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
-        </Field>
-        <TwoWayPriceField
-          label="Price"
-          quantity={q}
-          perUnit={perUnitPrice}
-          total={totalPrice}
-          onPerUnitChange={handlePerUnitChange}
-          onTotalChange={handleTotalChange}
-          perUnitCaption="Per item"
-          totalCaption="Total cost"
-        />
-        <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-        </Field>
-        <Field label="Description (optional)">
-          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
-        </Field>
-        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={saving}
-            className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
-            style={{ fontFamily: FONT_BODY }}
-          >
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saving}
-            className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
-            style={{ fontFamily: FONT_BODY }}
-          >
-            Cancel
-          </button>
-        </div>
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
+          <Field label="Item">
+            <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
+              {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Quantity">
+            <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
+          </Field>
+          <TwoWayPriceField
+            label="Price"
+            quantity={q}
+            perUnit={perUnitPrice}
+            total={totalPrice}
+            onPerUnitChange={handlePerUnitChange}
+            onTotalChange={handleTotalChange}
+            perUnitCaption="Per item"
+            totalCaption="Total cost"
+          />
+          <Field label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+          </Field>
+          <Field label="Description (optional)">
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
+          </Field>
+          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={saving}
+              className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
+              style={{ fontFamily: FONT_BODY }}
+            >
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
+              style={{ fontFamily: FONT_BODY }}
+            >
+              Cancel
+            </button>
+          </div>
+        </fieldset>
       </form>
     </div>
   );
@@ -1199,6 +1244,7 @@ function AddHarvestForm({ onSubmit }) {
   const [date, setDate] = useState(getTodayLocal());
   const [formError, setFormError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!success) return;
@@ -1206,21 +1252,30 @@ function AddHarvestForm({ onSubmit }) {
     return () => clearTimeout(t);
   }, [success]);
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    if (saving) return;
     const h = trayPcsToTotal(harvestedTrays, harvestedPcs);
     const r = trayPcsToTotal(rejectedTrays, rejectedPcs);
     if (h === null) { setFormError('Enter a valid number of trays/pcs harvested (0 or more).'); return; }
     if (r === null) { setFormError('Enter a valid number of trays/pcs rejected (0 or more).'); return; }
     if (r > h) { setFormError('Rejected eggs cannot exceed harvested eggs.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
-    onSubmit({ harvested: h, rejected: r, date });
     setFormError('');
-    setHarvestedTrays('');
-    setHarvestedPcs('');
-    setRejectedTrays('');
-    setRejectedPcs('');
-    setSuccess(true);
+    setSuccess(false);
+    setSaving(true);
+    try {
+      await onSubmit({ harvested: h, rejected: r, date });
+      setHarvestedTrays('');
+      setHarvestedPcs('');
+      setRejectedTrays('');
+      setRejectedPcs('');
+      setSuccess(true);
+    } catch (err) {
+      setFormError(api.errorMessage(err, 'Could not save your harvest. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1228,21 +1283,23 @@ function AddHarvestForm({ onSubmit }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Egg size={16} style={{ color: COLORS.yolk }} /> Record a Harvest
       </h2>
-      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
-        <TrayPcsField label="Eggs harvested" trays={harvestedTrays} pcs={harvestedPcs} onTraysChange={setHarvestedTrays} onPcsChange={setHarvestedPcs} unitLabel="eggs" />
-        <TrayPcsField label="Eggs rejected" trays={rejectedTrays} pcs={rejectedPcs} onTraysChange={setRejectedTrays} onPcsChange={setRejectedPcs} unitLabel="eggs" />
-        <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-        </Field>
-        {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        <SaveFeedback visible={success}>Harvest recorded.</SaveFeedback>
-        <button
-          type="submit"
-          className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
-          style={{ fontFamily: FONT_BODY }}
-        >
-          Add Harvest
-        </button>
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
+          <TrayPcsField label="Eggs harvested" trays={harvestedTrays} pcs={harvestedPcs} onTraysChange={setHarvestedTrays} onPcsChange={setHarvestedPcs} unitLabel="eggs" />
+          <TrayPcsField label="Eggs rejected" trays={rejectedTrays} pcs={rejectedPcs} onTraysChange={setRejectedTrays} onPcsChange={setRejectedPcs} unitLabel="eggs" />
+          <Field label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+          </Field>
+          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+          <SaveFeedback visible={success}>Harvest recorded.</SaveFeedback>
+          <button
+            type="submit"
+            className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
+            style={{ fontFamily: FONT_BODY }}
+          >
+            {saving ? 'Saving...' : 'Add Harvest'}
+          </button>
+        </fieldset>
       </form>
     </div>
   );
@@ -1256,22 +1313,22 @@ function EmptyRecords({ text }) {
   );
 }
 
-function RecordRow({ title, subtitle, description, amount, amountColor, badge, secondaryAction, confirming, removing, onEditClick, onDeleteClick, onCancel, delay = 0 }) {
+function RecordRow({ title, subtitle, description, amount, amountColor, badge, secondaryAction, confirming, removing, busy, onEditClick, onDeleteClick, onCancel, delay = 0 }) {
+  const reducedMotion = useReducedMotion();
   return (
-    <div
-      className="eggy-card-flush eggy-card-interactive eggy-rise px-4 py-3"
+    <motion.div
+      layout="position"
+      className="eggy-card-flush eggy-card-interactive px-4 py-3"
+      aria-busy={busy || removing}
+      initial={{ opacity: reducedMotion ? 1 : 0, y: reducedMotion ? 0 : 6 }}
+      animate={{ opacity: 1, y: 0, transition: { duration: reducedMotion ? 0 : 0.24, delay: reducedMotion ? 0 : delay / 1000 } }}
+      exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0, transition: { duration: reducedMotion ? 0 : 0.2 } }}
+      transition={{ layout: reducedMotion ? { duration: 0 } : SPRING }}
       style={{
         overflow: 'hidden',
-        transition: 'opacity 260ms ease, transform 260ms ease, max-height 260ms ease, margin-top 260ms ease, padding 260ms ease, box-shadow 260ms ease',
-        opacity: removing ? 0 : 1,
-        transform: removing ? 'scale(0.95)' : 'scale(1)',
-        maxHeight: removing ? 0 : 280,
         // A colour-coded edge on the left makes money-in vs money-out
         // scannable down the list without reading a single figure.
         borderLeft: `3px solid ${amountColor}`,
-        animationDelay: `${delay}ms`,
-        animationName: removing ? 'none' : undefined,
-        ...(removing ? { marginTop: 0, paddingTop: 0, paddingBottom: 0 } : null),
       }}
     >
       {/* The description/date text gets the full row width and the actions
@@ -1305,7 +1362,7 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
             line on a phone, so it drops below. With just the two icon
             actions it fits inline, which keeps the common (already-settled)
             row a compact two lines instead of three. */}
-        <div className={`flex items-center justify-end gap-1 ${secondaryAction || confirming ? 'w-full sm:w-auto mt-1.5 sm:mt-0' : 'w-auto -my-1'}`}>
+        <fieldset disabled={busy || removing} className={`flex min-w-0 items-center justify-end gap-1 ${secondaryAction || confirming ? 'w-full sm:w-auto mt-1.5 sm:mt-0' : 'w-auto -my-1'}`}>
         {confirming ? (
           <>
             {/* Says what's about to happen — the old version swapped in a bare
@@ -1317,7 +1374,7 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
               className="eggy-btn eggy-focus text-xs px-3 py-1.5"
               style={{ backgroundColor: COLORS.brick, color: '#FFF', fontFamily: FONT_BODY, boxShadow: ELEVATION.sm }}
             >
-              Delete
+              {removing ? 'Deleting…' : 'Delete'}
             </button>
             <button
               type="button"
@@ -1341,18 +1398,19 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
             </button>
           </>
         )}
-        </div>
+        </fieldset>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest, onUpdateSaleStatus, onUpdateSale, onUpdateExpense }) {
   const [subTab, setSubTab] = useState('sales');
   const [direction, setDirection] = useState(1);
-  const reducedMotion = useReducedMotion();
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
+  const [workingIds, setWorkingIds] = useState(new Set());
+  const [actionError, setActionError] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [saleSearch, setSaleSearch] = useState('');
   const [saleStatusFilter, setSaleStatusFilter] = useState('all');
@@ -1379,25 +1437,39 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
     });
   }, [sortedSales, saleSearch, saleStatusFilter]);
 
-  function handleDeleteClick(id) {
-    // Deleting mid-edit would race the optimistic edit save against the
-    // removal, so back out of edit mode first.
+  async function handleDeleteClick(id) {
     setEditingId(null);
     if (confirmId === id) {
-      setConfirmId(null);
-      // Play the collapse animation first, then actually remove the row —
-      // deleting immediately would yank it out from under the animation
-      // (the array update unmounts it mid-transition instead of finishing).
+      setActionError('');
       setRemovingId(id);
-      const tab = subTab;
-      setTimeout(() => {
-        if (tab === 'sales') onDeleteSale(id);
-        else if (tab === 'expenses') onDeleteExpense(id);
-        else onDeleteHarvest(id);
+      try {
+        if (subTab === 'sales') await onDeleteSale(id);
+        else if (subTab === 'expenses') await onDeleteExpense(id);
+        else await onDeleteHarvest(id);
+        setConfirmId(null);
+      } catch (err) {
+        setActionError(api.errorMessage(err, 'Could not delete this entry. Please try again.'));
+      } finally {
         setRemovingId(null);
-      }, reducedMotion ? 0 : 260);
+      }
     } else {
       setConfirmId(id);
+    }
+  }
+
+  async function handleStatusChange(id, status) {
+    setActionError('');
+    setWorkingIds((previous) => new Set([...previous, id]));
+    try {
+      await onUpdateSaleStatus(id, status);
+    } catch (err) {
+      setActionError(api.errorMessage(err, 'Could not update this sale. Please try again.'));
+    } finally {
+      setWorkingIds((previous) => {
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -1413,6 +1485,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
 
   return (
     <div className="space-y-3">
+      {actionError && <ErrorBanner message={actionError} onClose={() => setActionError('')} />}
       {/* Sticky so you can switch ledgers without scrolling back up through
           forty-odd rows first. */}
       <SegmentedControl
@@ -1482,59 +1555,62 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
               <EmptyRecords text="No sales match your search." />
             ) : (
               <div className="space-y-2">
-                {filteredSales.map((s, i) => (
-                  editingId === s.id ? (
-                    <EditSaleForm
-                      key={s.id}
-                      sale={s}
-                      onSave={(fields) => handleSaveSale(s.id, fields)}
-                      onCancel={() => setEditingId(null)}
-                    />
-                  ) : (
-                    <RecordRow
-                      key={s.id}
-                      delay={rowDelay(i)}
-                      title={`${s.eggSize} · ${s.quantity} eggs`}
-                      subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
-                      description={s.description}
-                      amount={formatCurrency(s.quantity * s.pricePerEgg)}
-                      amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
-                      badge={s.status === 'pending' && (
-                        <span
-                          className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase"
-                          style={{
-                            backgroundColor: `${COLORS.yolk}24`,
-                            color: COLORS.yolkDeep,
-                            fontFamily: FONT_BODY,
-                            letterSpacing: '0.06em',
-                          }}
-                        >
-                          Unpaid
-                        </span>
-                      )}
-                      // Only unpaid sales carry an inline status button: settling
-                      // one is the action that actually gets taken. Putting the
-                      // reverse on all ~40 settled rows cost each of them a whole
-                      // extra line for a correction that's rare — it's still
-                      // available through Edit, which has the same checkbox.
-                      secondaryAction={s.status === 'pending' ? (
-                        <button
-                          type="button"
-                          onClick={() => onUpdateSaleStatus(s.id, 'paid')}
-                          className="eggy-btn eggy-btn-accent eggy-focus text-xs px-3 py-1.5 whitespace-nowrap"
-                          style={{ fontFamily: FONT_BODY }}
-                        >
-                          Mark Paid
-                        </button>
-                      ) : null}
-                      confirming={confirmId === s.id}
-                      removing={removingId === s.id}
-                      onEditClick={() => setEditingId(s.id)}
-                      onDeleteClick={() => handleDeleteClick(s.id)}
-                      onCancel={() => setConfirmId(null)}
-                    />
-                  )
-                ))}
+                <AnimatePresence initial={false}>
+                  {filteredSales.map((s, i) => (
+                    editingId === s.id ? (
+                      <EditSaleForm
+                        key={s.id}
+                        sale={s}
+                        onSave={(fields) => handleSaveSale(s.id, fields)}
+                        onCancel={() => setEditingId(null)}
+                      />
+                    ) : (
+                      <RecordRow
+                        key={s.id}
+                        delay={rowDelay(i)}
+                        title={`${s.eggSize} · ${s.quantity} eggs`}
+                        subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
+                        description={s.description}
+                        amount={formatCurrency(s.quantity * s.pricePerEgg)}
+                        amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
+                        badge={s.status === 'pending' && (
+                          <span
+                            className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase"
+                            style={{
+                              backgroundColor: `${COLORS.yolk}24`,
+                              color: COLORS.yolkDeep,
+                              fontFamily: FONT_BODY,
+                              letterSpacing: '0.06em',
+                            }}
+                          >
+                            Unpaid
+                          </span>
+                        )}
+                        // Only unpaid sales carry an inline status button: settling
+                        // one is the action that actually gets taken. Putting the
+                        // reverse on all ~40 settled rows cost each of them a whole
+                        // extra line for a correction that's rare — it's still
+                        // available through Edit, which has the same checkbox.
+                        secondaryAction={s.status === 'pending' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleStatusChange(s.id, 'paid')}
+                            className="eggy-btn eggy-btn-accent eggy-focus text-xs px-3 py-1.5 whitespace-nowrap"
+                            style={{ fontFamily: FONT_BODY }}
+                          >
+                            {workingIds.has(s.id) ? 'Saving...' : 'Mark Paid'}
+                          </button>
+                        ) : null}
+                        confirming={confirmId === s.id}
+                        removing={removingId === s.id}
+                        busy={workingIds.has(s.id)}
+                        onEditClick={() => setEditingId(s.id)}
+                        onDeleteClick={() => handleDeleteClick(s.id)}
+                        onCancel={() => setConfirmId(null)}
+                      />
+                    )
+                  ))}
+                </AnimatePresence>
               </div>
             )
           )}
@@ -1544,31 +1620,33 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
               <EmptyRecords text="No expenses recorded yet." />
             ) : (
               <div className="space-y-2">
-                {sortedExpenses.map((e, i) => (
-                  editingId === e.id ? (
-                    <EditExpenseForm
-                      key={e.id}
-                      expense={e}
-                      onSave={(fields) => handleSaveExpense(e.id, fields)}
-                      onCancel={() => setEditingId(null)}
-                    />
-                  ) : (
-                    <RecordRow
-                      key={e.id}
-                      delay={rowDelay(i)}
-                      title={`${e.item} · ${e.quantity}x`}
-                      subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
-                      description={e.description}
-                      amount={formatCurrency(e.quantity * e.price)}
-                      amountColor={COLORS.brick}
-                      confirming={confirmId === e.id}
-                      removing={removingId === e.id}
-                      onEditClick={() => setEditingId(e.id)}
-                      onDeleteClick={() => handleDeleteClick(e.id)}
-                      onCancel={() => setConfirmId(null)}
-                    />
-                  )
-                ))}
+                <AnimatePresence initial={false}>
+                  {sortedExpenses.map((e, i) => (
+                    editingId === e.id ? (
+                      <EditExpenseForm
+                        key={e.id}
+                        expense={e}
+                        onSave={(fields) => handleSaveExpense(e.id, fields)}
+                        onCancel={() => setEditingId(null)}
+                      />
+                    ) : (
+                      <RecordRow
+                        key={e.id}
+                        delay={rowDelay(i)}
+                        title={`${e.item} · ${e.quantity}x`}
+                        subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
+                        description={e.description}
+                        amount={formatCurrency(e.quantity * e.price)}
+                        amountColor={COLORS.brick}
+                        confirming={confirmId === e.id}
+                        removing={removingId === e.id}
+                        onEditClick={() => setEditingId(e.id)}
+                        onDeleteClick={() => handleDeleteClick(e.id)}
+                        onCancel={() => setConfirmId(null)}
+                      />
+                    )
+                  ))}
+                </AnimatePresence>
               </div>
             )
           )}
@@ -1578,20 +1656,22 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
               <EmptyRecords text="No harvests recorded yet." />
             ) : (
               <div className="space-y-2">
-                {sortedHarvests.map((h, i) => (
-                  <RecordRow
-                    key={h.id}
-                    delay={rowDelay(i)}
-                    title={`${h.harvested} eggs harvested`}
-                    subtitle={`${formatDateDisplay(h.date)} · ${h.rejected} rejected`}
-                    amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
-                    amountColor={COLORS.moss}
-                    confirming={confirmId === h.id}
-                    removing={removingId === h.id}
-                    onDeleteClick={() => handleDeleteClick(h.id)}
-                    onCancel={() => setConfirmId(null)}
-                  />
-                ))}
+                <AnimatePresence initial={false}>
+                  {sortedHarvests.map((h, i) => (
+                    <RecordRow
+                      key={h.id}
+                      delay={rowDelay(i)}
+                      title={`${h.harvested} eggs harvested`}
+                      subtitle={`${formatDateDisplay(h.date)} · ${h.rejected} rejected`}
+                      amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
+                      amountColor={COLORS.moss}
+                      confirming={confirmId === h.id}
+                      removing={removingId === h.id}
+                      onDeleteClick={() => handleDeleteClick(h.id)}
+                      onCancel={() => setConfirmId(null)}
+                    />
+                  ))}
+                </AnimatePresence>
               </div>
             )
           )}
@@ -1653,33 +1733,16 @@ function TabBar({ tab, setTab }) {
 }
 
 export default function EggFarmDashboard({ username, onLogout }) {
-  const [sales, setSales] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [harvests, setHarvests] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    sales, expenses, harvests, loading, error, syncStatus, clearError, retry,
+    addSale, updateSale, updateSaleStatus, deleteSale,
+    addExpense, updateExpense, deleteExpense, addHarvest, deleteHarvest,
+  } = useLedger();
   const [tab, setTab] = useState('dashboard');
   const [direction, setDirection] = useState(1);
   const [granularity, setGranularity] = useState('daily');
-  const [error, setErrorMsg] = useState('');
   const [avgGranularity, setAvgGranularity] = useState('daily');
   const [avgPeriodValue, setAvgPeriodValue] = useState(() => getPeriodDefaultValue('daily'));
-  // 'idle' | 'syncing' | 'slow' — drives SyncBanner, shown only for a
-  // background refresh (see the visibilitychange effect below).
-  const [syncStatus, setSyncStatus] = useState('idle');
-
-  // Shared by every load() call (mount or background) instead of a local
-  // flag scoped to one effect, since background refreshes are triggered
-  // from a separate effect further down.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    // Reset (not just initialize) on mount: React StrictMode's dev-only
-    // double-invoke runs this effect's cleanup once immediately after the
-    // first mount to test for leaks, which would otherwise leave this
-    // stuck at false forever — silently dropping every setState in load()
-    // below, including the one that clears the loading spinner.
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
 
   // Switching modes (Day/Week/Month/Year) resets the picker to "now" in
   // that mode, rather than leaving it on a value that no longer makes
@@ -1695,216 +1758,6 @@ export default function EggFarmDashboard({ username, onLogout }) {
     link.href = 'https://fonts.googleapis.com/css2?family=Bitter:wght@500;600;700&family=Work+Sans:wght@400;500;600&display=swap';
     document.head.appendChild(link);
     return () => { document.head.removeChild(link); };
-  }, []);
-
-  // background=true is used for a resume refresh (see the visibilitychange
-  // effect below): it skips the SyncBanner delay logic on the initial
-  // mount load, and on failure leaves existing data on screen instead of
-  // wiping it to empty — stale data the user can still see beats a blank
-  // dashboard because one request hit a slow cold start.
-  const load = useCallback(async ({ background = false } = {}) => {
-    let syncingTimer;
-    let slowTimer;
-    if (background) {
-      // Only surface the banner if this is actually slow — most resumes
-      // hit an already-warm backend and finish near-instantly, and
-      // flashing a status message for those would just be noise. "slow"
-      // lands around what a cold Vercel function + cold Neon compute
-      // together tend to cost, which is the case worth telling the user
-      // about.
-      syncingTimer = setTimeout(() => { if (mountedRef.current) setSyncStatus('syncing'); }, 500);
-      slowTimer = setTimeout(() => { if (mountedRef.current) setSyncStatus('slow'); }, 3000);
-    }
-
-    // Fire all three requests together instead of one-at-a-time — calling
-    // these without awaiting starts each fetch immediately, so they run
-    // concurrently on the network. The awaits below just pick up results
-    // as they arrive; each keeps its own try/catch so one endpoint failing
-    // (e.g. harvests) still lets the other two populate normally.
-    const salesPromise = api.listSales();
-    const expensesPromise = api.listExpenses();
-    const harvestsPromise = api.listHarvests();
-
-    try {
-      const s = await salesPromise;
-      if (mountedRef.current) setSales(s);
-    } catch (e) {
-      if (mountedRef.current) {
-        if (!background) setSales([]);
-        setErrorMsg('Could not load sales. Please try again.');
-      }
-    }
-    try {
-      const ex = await expensesPromise;
-      if (mountedRef.current) setExpenses(ex);
-    } catch (e) {
-      if (mountedRef.current) {
-        if (!background) setExpenses([]);
-        setErrorMsg('Could not load expenses. Please try again.');
-      }
-    }
-    try {
-      const h = await harvestsPromise;
-      if (mountedRef.current) setHarvests(h);
-    } catch (e) {
-      if (mountedRef.current) {
-        if (!background) setHarvests([]);
-        setErrorMsg('Could not load harvests. Please try again.');
-      }
-    }
-
-    if (mountedRef.current) {
-      setLoading(false);
-      if (background) {
-        clearTimeout(syncingTimer);
-        clearTimeout(slowTimer);
-        setSyncStatus('idle');
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Mobile PWAs are often kept alive in the background instead of being
-  // fully closed, so reopening the app can show data that's minutes or
-  // hours stale with no indication anything needs refreshing. Refetching
-  // on every foreground return keeps things current — these are cheap,
-  // already-parallelized reads, and pinging on resume has the side benefit
-  // of helping keep Vercel's function and Neon's compute from going cold
-  // as often in the first place.
-  useEffect(() => {
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') load({ background: true });
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [load]);
-
-  // Optimistic: show the sale immediately under a temporary id rather than
-  // waiting for the round trip. On success we swap in the server's row (real
-  // id, so delete works); on failure we remove the temp entry and surface an
-  // error, instead of leaving a record on screen that was never actually saved.
-  const addSale = useCallback(async (entry) => {
-    const tempId = crypto.randomUUID();
-    setSales((prev) => [...prev, { ...entry, id: tempId, createdAt: new Date().toISOString() }]);
-    try {
-      const sale = await api.createSale(entry);
-      setSales((prev) => prev.map((s) => (s.id === tempId ? sale : s)));
-    } catch (e) {
-      setSales((prev) => prev.filter((s) => s.id !== tempId));
-      setErrorMsg('Could not save your sale. Please try again.');
-    }
-  }, []);
-
-  const deleteSale = useCallback(async (id) => {
-    try {
-      await api.deleteSale(id);
-      setSales((prev) => prev.filter((s) => s.id !== id));
-    } catch (e) {
-      setErrorMsg('Could not delete this sale. Please try again.');
-    }
-  }, []);
-
-  // Optimistic like addSale above: flip the status in place immediately (a
-  // paid/pending toggle is low-risk and instantly reversible by tapping
-  // again), then reconcile with the server. On failure, revert to whatever
-  // status this sale had before the tap rather than guessing the opposite.
-  const updateSaleStatus = useCallback(async (id, status) => {
-    let previousStatus;
-    setSales((prev) => prev.map((s) => {
-      if (s.id !== id) return s;
-      previousStatus = s.status;
-      return { ...s, status };
-    }));
-    try {
-      const sale = await api.updateSaleStatus(id, status);
-      setSales((prev) => prev.map((s) => (s.id === id ? sale : s)));
-    } catch (e) {
-      setSales((prev) => prev.map((s) => (s.id === id ? { ...s, status: previousStatus } : s)));
-      setErrorMsg('Could not update this sale. Please try again.');
-    }
-  }, []);
-
-  // Full-record edit (all fields at once), same optimistic-then-reconcile
-  // shape as updateSaleStatus above but reverting to the whole previous
-  // record on failure rather than just one field.
-  const updateSale = useCallback(async (id, fields) => {
-    let previous;
-    setSales((prev) => prev.map((s) => {
-      if (s.id !== id) return s;
-      previous = s;
-      return { ...s, ...fields };
-    }));
-    try {
-      const sale = await api.updateSale(id, fields);
-      setSales((prev) => prev.map((s) => (s.id === id ? sale : s)));
-    } catch (e) {
-      setSales((prev) => prev.map((s) => (s.id === id ? previous : s)));
-      setErrorMsg('Could not update this sale. Please try again.');
-    }
-  }, []);
-
-  // Same optimistic-then-reconcile approach as addSale above.
-  const addExpense = useCallback(async (entry) => {
-    const tempId = crypto.randomUUID();
-    setExpenses((prev) => [...prev, { ...entry, id: tempId, createdAt: new Date().toISOString() }]);
-    try {
-      const expense = await api.createExpense(entry);
-      setExpenses((prev) => prev.map((x) => (x.id === tempId ? expense : x)));
-    } catch (e) {
-      setExpenses((prev) => prev.filter((x) => x.id !== tempId));
-      setErrorMsg('Could not save your expense. Please try again.');
-    }
-  }, []);
-
-  const deleteExpense = useCallback(async (id) => {
-    try {
-      await api.deleteExpense(id);
-      setExpenses((prev) => prev.filter((e) => e.id !== id));
-    } catch (e) {
-      setErrorMsg('Could not delete this expense. Please try again.');
-    }
-  }, []);
-
-  // Full-record edit for expenses — same shape as updateSale above.
-  const updateExpense = useCallback(async (id, fields) => {
-    let previous;
-    setExpenses((prev) => prev.map((x) => {
-      if (x.id !== id) return x;
-      previous = x;
-      return { ...x, ...fields };
-    }));
-    try {
-      const expense = await api.updateExpense(id, fields);
-      setExpenses((prev) => prev.map((x) => (x.id === id ? expense : x)));
-    } catch (e) {
-      setExpenses((prev) => prev.map((x) => (x.id === id ? previous : x)));
-      setErrorMsg('Could not update this expense. Please try again.');
-    }
-  }, []);
-
-  // Same optimistic-then-reconcile approach as addSale above.
-  const addHarvest = useCallback(async (entry) => {
-    const tempId = crypto.randomUUID();
-    setHarvests((prev) => [...prev, { ...entry, id: tempId, createdAt: new Date().toISOString() }]);
-    try {
-      const harvest = await api.createHarvest(entry);
-      setHarvests((prev) => prev.map((x) => (x.id === tempId ? harvest : x)));
-    } catch (e) {
-      setHarvests((prev) => prev.filter((x) => x.id !== tempId));
-      setErrorMsg('Could not save your harvest. Please try again.');
-    }
-  }, []);
-
-  const deleteHarvest = useCallback(async (id) => {
-    try {
-      await api.deleteHarvest(id);
-      setHarvests((prev) => prev.filter((h) => h.id !== id));
-    } catch (e) {
-      setErrorMsg('Could not delete this harvest. Please try again.');
-    }
   }, []);
 
   // Pending (utang) sales aren't real revenue yet — exclude them from every
@@ -2002,7 +1855,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
       <Header username={username} onLogout={onLogout} />
       <main className="max-w-4xl mx-auto px-4 pt-4">
         <SyncBanner status={syncStatus} />
-        {error && <ErrorBanner message={error} onClose={() => setErrorMsg('')} />}
+        {error && <ErrorBanner message={error} onClose={clearError} onRetry={retry} />}
         <ScreenTransition viewKey={tab} direction={direction} resetScroll>
           {tab === 'dashboard' && (
             <DashboardView

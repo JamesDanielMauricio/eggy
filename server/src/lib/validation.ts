@@ -26,9 +26,12 @@ export function toDateOnly(value: string): string {
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// description is always optional, so `undefined` passes — this only rejects
-// a description that was actually sent but isn't a string within the
-// `char_length(...) <= 500` CHECK constraint on the sales/expenses tables.
-export function isValidOptionalDescription(value: unknown): value is string | undefined {
-  return value === undefined || (typeof value === "string" && value.length <= 500);
+// Omitted means leave unchanged; null explicitly clears the note. Both
+// match the nullable database columns and the edit forms' request bodies.
+export function isValidOptionalDescription(value: unknown): value is string | null | undefined {
+  return value == null || (typeof value === "string" && value.length <= 500);
+}
+
+export function normalizeDescription(value: string | null | undefined): string | null | undefined {
+  return value === undefined ? undefined : value?.trim() || null;
 }

@@ -7,6 +7,7 @@ import { db } from "./db/index.js";
 import { salesRouter } from "./routes/sales.js";
 import { expensesRouter } from "./routes/expenses.js";
 import { harvestsRouter } from "./routes/harvests.js";
+import { ledgerRouter } from "./routes/ledger.js";
 import { authRouter } from "./routes/auth.js";
 import { requireAuth } from "./lib/requireAuth.js";
 
@@ -45,6 +46,7 @@ app.use("/api/auth", authRouter);
 // Everything below here is this farm's private financial data — require a
 // valid login session before any of it can be read or written.
 app.use("/api/sales", requireAuth, salesRouter);
+app.use("/api/ledger", requireAuth, ledgerRouter);
 app.use("/api/expenses", requireAuth, expensesRouter);
 app.use("/api/harvests", requireAuth, harvestsRouter);
 

@@ -8,6 +8,7 @@ import {
   isPositiveInteger,
   isValidDateString,
   isValidOptionalDescription,
+  normalizeDescription,
   toDateOnly,
   UUID_RE,
 } from "../lib/validation.js";
@@ -57,7 +58,7 @@ salesRouter.post(
     // A blank/whitespace-only description is the same as "no description" —
     // store null rather than an empty string so the list view's `s.description
     // && ...` check treats it consistently.
-    const trimmedDescription = description === undefined ? undefined : description.trim() || null;
+    const trimmedDescription = normalizeDescription(description);
 
     const [row] = await db
       .insert(sales)
@@ -114,10 +115,7 @@ salesRouter.patch(
     }
     if (description !== undefined) {
       if (!isValidOptionalDescription(description)) errors.push("description must be text no longer than 500 characters");
-      // Blank/whitespace-only means "clear it", same as on create. (The `??
-      // ""` is just to satisfy the type checker — the outer `!== undefined`
-      // already guarantees this is a string here.)
-      else updates.description = (description ?? "").trim() || null;
+      else updates.description = normalizeDescription(description);
     }
     if (Object.keys(updates).length === 0 && errors.length === 0) {
       errors.push("at least one field must be provided");

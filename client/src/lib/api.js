@@ -3,6 +3,11 @@
 // Local dev still sets VITE_API_URL to hit the local server directly.
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
+export function errorMessage(error, fallback) {
+  if (error.status === 401) return 'Your session has expired. Please sign in again.';
+  return error.status === 400 || error.status === 404 ? error.message : fallback;
+}
+
 async function request(path, options) {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -21,6 +26,15 @@ async function request(path, options) {
     throw error;
   }
   return res.status === 204 ? null : res.json();
+}
+
+export async function getLedger({ signal } = {}) {
+  const ledger = await request('/api/ledger', { signal });
+  return {
+    sales: ledger.sales.map(fromSaleRow),
+    expenses: ledger.expenses.map(fromExpenseRow),
+    harvests: ledger.harvests.map(fromHarvestRow),
+  };
 }
 
 export async function login(username, password) {
