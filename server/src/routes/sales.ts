@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { EGG_SIZES, SALE_STATUSES, sales } from "../db/schema.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
@@ -26,7 +26,7 @@ salesRouter.get(
 salesRouter.post(
   "/",
   asyncHandler(async (req, res) => {
-    const { eggSize, quantity, pricePerEgg, date, status, description } = req.body ?? {};
+    const { eggSize, quantity, pricePerEgg, totalPrice, date, status, description } = req.body ?? {};
 
     const errors: string[] = [];
     if (!EGG_SIZES.includes(eggSize)) {
@@ -37,6 +37,9 @@ salesRouter.post(
     }
     if (!isNonNegativeNumber(pricePerEgg)) {
       errors.push("pricePerEgg must be zero or a positive number");
+    }
+    if (totalPrice !== undefined && (!isNonNegativeNumber(totalPrice) || totalPrice >= 1e18)) {
+      errors.push("totalPrice must be zero or a positive number below 1e18");
     }
     if (!isValidDateString(date)) {
       errors.push("date must be a valid date");
@@ -66,6 +69,7 @@ salesRouter.post(
         eggSize,
         quantity,
         pricePerEgg: pricePerEgg.toFixed(2),
+        ...(totalPrice !== undefined ? { totalPrice: totalPrice.toFixed(2) } : {}),
         saleDate: toDateOnly(date),
         ...(status !== undefined ? { status } : {}),
         ...(trimmedDescription !== undefined ? { description: trimmedDescription } : {}),
@@ -88,7 +92,7 @@ salesRouter.patch(
     // Partial update — every field is optional so callers like the status
     // toggle (which only ever sends `{ status }`) keep working unchanged
     // alongside the full record-edit form (which sends everything it owns).
-    const { eggSize, quantity, pricePerEgg, date, status, description } = req.body ?? {};
+    const { eggSize, quantity, pricePerEgg, totalPrice, date, status, description } = req.body ?? {};
 
     const errors: string[] = [];
     const updates: Record<string, unknown> = {};
@@ -104,6 +108,10 @@ salesRouter.patch(
     if (pricePerEgg !== undefined) {
       if (!isNonNegativeNumber(pricePerEgg)) errors.push("pricePerEgg must be zero or a positive number");
       else updates.pricePerEgg = pricePerEgg.toFixed(2);
+    }
+    if (totalPrice !== undefined) {
+      if (!isNonNegativeNumber(totalPrice) || totalPrice >= 1e18) errors.push("totalPrice must be zero or a positive number below 1e18");
+      else updates.totalPrice = totalPrice.toFixed(2);
     }
     if (date !== undefined) {
       if (!isValidDateString(date)) errors.push("date must be a valid date");
@@ -125,6 +133,15 @@ salesRouter.patch(
       return;
     }
 
+    if (totalPrice === undefined && (quantity !== undefined || pricePerEgg !== undefined)) {
+      // Older clients don't send an exact total. Preserve it for a note or
+      // status edit with unchanged pricing; recalculate when pricing changes.
+      const unchanged = and(
+        quantity !== undefined ? eq(sales.quantity, quantity) : undefined,
+        pricePerEgg !== undefined ? eq(sales.pricePerEgg, pricePerEgg.toFixed(2)) : undefined,
+      );
+      updates.totalPrice = sql`case when ${unchanged} then ${sales.totalPrice} else null end`;
+    }
     const [updated] = await db.update(sales).set(updates).where(eq(sales.id, id)).returning();
     if (!updated) {
       res.status(404).json({ error: "sale not found" });

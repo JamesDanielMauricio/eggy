@@ -31,6 +31,9 @@ export const sales = pgTable(
     eggSize: text("egg_size").notNull(),
     quantity: integer("quantity").notNull(),
     pricePerEgg: numeric("price_per_egg", { precision: 10, scale: 2 }).notNull(),
+    // The entered total is authoritative when a tray/total price doesn't
+    // divide evenly into a two-decimal per-egg price. Legacy rows stay null.
+    totalPrice: numeric("total_price", { precision: 20, scale: 2 }),
     saleDate: date("sale_date").notNull(),
     // "pending" = eggs handed over but customer hasn't paid yet (utang).
     // Defaults to "paid" so every existing row and any API caller that
@@ -47,6 +50,7 @@ export const sales = pgTable(
     ),
     check("sales_quantity_check", sql`${table.quantity} > 0`),
     check("sales_price_per_egg_check", sql`${table.pricePerEgg} >= 0`),
+    check("sales_total_price_check", sql`${table.totalPrice} >= 0`),
     check("sales_status_check", sql`${table.status} in ('paid','pending')`),
     check("sales_description_check", sql`char_length(${table.description}) <= 500`),
   ]

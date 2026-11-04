@@ -55,7 +55,7 @@ export async function getCurrentUser() {
 // The API returns Drizzle's column names (saleDate, numeric fields as
 // strings); the component works with `date` and plain JS numbers.
 function fromSaleRow(row) {
-  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), status: row.status, description: row.description, createdAt: row.createdAt };
+  return { id: row.id, eggSize: row.eggSize, quantity: row.quantity, date: row.saleDate, pricePerEgg: Number(row.pricePerEgg), totalPrice: row.totalPrice == null ? null : Number(row.totalPrice), status: row.status, description: row.description, createdAt: row.createdAt };
 }
 
 function fromExpenseRow(row) {
@@ -73,10 +73,10 @@ export async function listSales() {
   return rows.map(fromSaleRow);
 }
 
-export async function createSale({ eggSize, quantity, pricePerEgg, date, status, description }) {
+export async function createSale({ eggSize, quantity, pricePerEgg, totalPrice, date, status, description }) {
   const row = await request('/api/sales', {
     method: 'POST',
-    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date, status, description }),
+    body: JSON.stringify({ eggSize, quantity, pricePerEgg, totalPrice, date, status, description }),
   });
   return fromSaleRow(row);
 }
@@ -89,10 +89,10 @@ export async function updateSaleStatus(id, status) {
   return fromSaleRow(row);
 }
 
-export async function updateSale(id, { eggSize, quantity, pricePerEgg, date, status, description }) {
+export async function updateSale(id, { eggSize, quantity, pricePerEgg, totalPrice, date, status, description }) {
   const row = await request(`/api/sales/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ eggSize, quantity, pricePerEgg, date, status, description }),
+    body: JSON.stringify({ eggSize, quantity, pricePerEgg, totalPrice, date, status, description }),
   });
   return fromSaleRow(row);
 }

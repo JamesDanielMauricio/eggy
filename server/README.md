@@ -23,6 +23,12 @@ npm run db:migrate
 
 ## Dashboard reads
 
+Sales can include an exact `totalPrice` alongside the rounded per-egg
+price. Apply migration `0006_sale_total_price` before deploying this version.
+Tray prices use 30 eggs; record amounts, revenue, and charts use the saved
+total when present. Older records continue to use quantity times per-egg
+price. Status and description edits preserve the saved total.
+
 The dashboard uses authenticated `GET /api/ledger` to read sales, expenses,
 and harvests in one PostgreSQL statement and one HTTP request. The response
 keeps the same record fields as the individual collection endpoints, which

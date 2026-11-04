@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import * as api from './lib/api';
 import { useLedger } from './lib/useLedger';
+import { TRAY_SIZE, saleTotal } from './lib/salePricing';
+import { useSalePricing } from './lib/useSalePricing';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle, ELEVATION, NUM_TABULAR } from './lib/theme';
 
 const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large', 'Jumbo', 'Reject'];
@@ -51,7 +53,6 @@ const EXPENSE_COLORS = {
 };
 
 const PERIOD_LIMITS = { daily: 30, weekly: 12, monthly: 12, yearly: 6 };
-const TRAY_SIZE = 30;
 const TAB_ORDER = ['dashboard', 'addSale', 'addExpense', 'addHarvest', 'records'];
 
 // Blank fields default to 0 (a partial "3 trays, no loose pcs" entry is
@@ -122,7 +123,7 @@ function aggregateByPeriod(sales, expenses, granularity) {
   sales.forEach((s) => {
     const key = getPeriodKey(s.date, granularity);
     if (!groups[key]) groups[key] = { key, revenue: 0, quantity: 0, expenses: 0 };
-    groups[key].revenue += s.quantity * s.pricePerEgg;
+    groups[key].revenue += saleTotal(s);
     groups[key].quantity += s.quantity;
   });
   expenses.forEach((e) => {
@@ -737,37 +738,54 @@ function DashboardView({
   );
 }
 
-// Two price inputs that stay in sync with each other via the quantity:
-// typing a per-unit price fills in the total, typing a total fills in the
-// per-unit price — whichever one the user didn't type into is derived, so
-// they never have to do that division/multiplication by hand.
-function TwoWayPriceField({ label, quantity, perUnit, total, onPerUnitChange, onTotalChange, perUnitCaption, totalCaption }) {
+// Sales include a price per 30-egg tray between the unit and total prices.
+function PriceField({ label, quantity, perUnit, perTray, total, onPerUnitChange, onPerTrayChange, onTotalChange, perUnitCaption, totalCaption }) {
+  const hasTray = !!onPerTrayChange;
   return (
     <Field label={label}>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${hasTray ? 'grid-cols-2 min-[360px]:grid-cols-3' : 'grid-cols-2'}`}>
         <div>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
             <input
               type="number" min="0" step="0.01"
+              aria-label={perUnitCaption}
               value={perUnit}
               onChange={(e) => onPerUnitChange(e.target.value)}
               placeholder="0.00"
-              className={`${inputClasses} pl-7`}
+              className={`${inputClasses} eggy-price-input pl-7 pr-2`}
               style={inputStyle}
             />
           </div>
           <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{perUnitCaption}</span>
         </div>
-        <div>
+        {hasTray && (
+          <div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
+              <input
+                type="number" min="0" step="0.01"
+                aria-label="Per tray"
+                value={perTray}
+                onChange={(e) => onPerTrayChange(e.target.value)}
+                placeholder="0.00"
+                className={`${inputClasses} eggy-price-input pl-7 pr-2`}
+                style={inputStyle}
+              />
+            </div>
+            <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Per tray (30 eggs)</span>
+          </div>
+        )}
+        <div className={hasTray ? 'col-span-2 min-[360px]:col-span-1' : undefined}>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
             <input
               type="number" min="0" step="0.01"
+              aria-label={totalCaption}
               value={total}
               onChange={(e) => onTotalChange(e.target.value)}
               placeholder="0.00"
-              className={`${inputClasses} pl-7`}
+              className={`${inputClasses} eggy-price-input pl-7 pr-2`}
               style={inputStyle}
             />
           </div>
@@ -775,7 +793,7 @@ function TwoWayPriceField({ label, quantity, perUnit, total, onPerUnitChange, on
         </div>
       </div>
       {quantity <= 0 && (
-        <p className="text-xs mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Enter a quantity above to auto-fill the other price.</p>
+        <p className="text-xs mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{hasTray ? 'Enter a quantity above to calculate the sale total.' : 'Enter a quantity above to auto-fill the other price.'}</p>
       )}
     </Field>
   );
@@ -786,8 +804,6 @@ function AddSaleForm({ onSubmit }) {
   const [trays, setTrays] = useState('');
   const [pcs, setPcs] = useState('');
   const [date, setDate] = useState(getTodayLocal());
-  const [perUnitPrice, setPerUnitPrice] = useState('');
-  const [totalPrice, setTotalPrice] = useState('');
   const [isPending, setIsPending] = useState(false);
   const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
@@ -802,23 +818,11 @@ function AddSaleForm({ onSubmit }) {
 
   const q = trayPcsToTotal(trays, pcs) ?? 0;
 
-  function handlePerUnitChange(value) {
-    setPerUnitPrice(value);
-    if (value === '') { setTotalPrice(''); return; }
-    const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setTotalPrice((num * q).toFixed(2));
-    }
-  }
-
-  function handleTotalChange(value) {
-    setTotalPrice(value);
-    if (value === '') { setPerUnitPrice(''); return; }
-    const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setPerUnitPrice((num / q).toFixed(2));
-    }
-  }
+  const {
+    perEgg: perUnitPrice, perTray: perTrayPrice, total: totalPrice,
+    changePerEgg: handlePerUnitChange, changePerTray: handlePerTrayChange,
+    changeTotal: handleTotalChange, reset: resetPricing,
+  } = useSalePricing(q);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -827,16 +831,16 @@ function AddSaleForm({ onSubmit }) {
     if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
     const pricePerEgg = Number(perUnitPrice);
     if (perUnitPrice === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
+    if (totalPrice === '' || !Number.isFinite(Number(totalPrice)) || Number(totalPrice) < 0 || Number(totalPrice) >= 1e18) { setFormError('Enter a valid sale total.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
     setFormError('');
     setSuccess(false);
     setSaving(true);
     try {
-      await onSubmit({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || undefined });
+      await onSubmit({ eggSize, quantity, date, pricePerEgg, totalPrice: Number(totalPrice), status: isPending ? 'pending' : 'paid', description: description.trim() || undefined });
       setTrays('');
       setPcs('');
-      setPerUnitPrice('');
-      setTotalPrice('');
+      resetPricing();
       setDescription('');
       setSuccess(true);
     } catch (err) {
@@ -859,12 +863,14 @@ function AddSaleForm({ onSubmit }) {
             </select>
           </Field>
           <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
-          <TwoWayPriceField
+          <PriceField
             label="Price"
             quantity={q}
             perUnit={perUnitPrice}
+            perTray={perTrayPrice}
             total={totalPrice}
             onPerUnitChange={handlePerUnitChange}
+            onPerTrayChange={handlePerTrayChange}
             onTotalChange={handleTotalChange}
             perUnitCaption="Per egg"
             totalCaption="Total sale"
@@ -978,7 +984,7 @@ function AddExpenseForm({ onSubmit }) {
           <Field label="Quantity">
             <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
           </Field>
-          <TwoWayPriceField
+          <PriceField
             label="Price"
             quantity={q}
             perUnit={perUnitPrice}
@@ -1017,8 +1023,6 @@ function EditSaleForm({ sale, onSave, onCancel }) {
   const [trays, setTrays] = useState(String(Math.floor(sale.quantity / TRAY_SIZE)));
   const [pcs, setPcs] = useState(String(sale.quantity % TRAY_SIZE));
   const [date, setDate] = useState(sale.date);
-  const [perUnitPrice, setPerUnitPrice] = useState(sale.pricePerEgg.toFixed(2));
-  const [totalPrice, setTotalPrice] = useState((sale.quantity * sale.pricePerEgg).toFixed(2));
   const [isPending, setIsPending] = useState(sale.status === 'pending');
   const [description, setDescription] = useState(sale.description || '');
   const [formError, setFormError] = useState('');
@@ -1026,23 +1030,11 @@ function EditSaleForm({ sale, onSave, onCancel }) {
 
   const q = trayPcsToTotal(trays, pcs) ?? 0;
 
-  function handlePerUnitChange(value) {
-    setPerUnitPrice(value);
-    if (value === '') { setTotalPrice(''); return; }
-    const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setTotalPrice((num * q).toFixed(2));
-    }
-  }
-
-  function handleTotalChange(value) {
-    setTotalPrice(value);
-    if (value === '') { setPerUnitPrice(''); return; }
-    const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setPerUnitPrice((num / q).toFixed(2));
-    }
-  }
+  const {
+    perEgg: perUnitPrice, perTray: perTrayPrice, total: totalPrice,
+    changePerEgg: handlePerUnitChange, changePerTray: handlePerTrayChange,
+    changeTotal: handleTotalChange,
+  } = useSalePricing(q, sale);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -1051,11 +1043,12 @@ function EditSaleForm({ sale, onSave, onCancel }) {
     if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
     const pricePerEgg = Number(perUnitPrice);
     if (perUnitPrice === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
+    if (totalPrice === '' || !Number.isFinite(Number(totalPrice)) || Number(totalPrice) < 0 || Number(totalPrice) >= 1e18) { setFormError('Enter a valid sale total.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
     setFormError('');
     setSaving(true);
     try {
-      await onSave({ eggSize, quantity, date, pricePerEgg, status: isPending ? 'pending' : 'paid', description: description.trim() || null });
+      await onSave({ eggSize, quantity, date, pricePerEgg, totalPrice: Number(totalPrice), status: isPending ? 'pending' : 'paid', description: description.trim() || null });
     } catch (err) {
       setFormError(api.errorMessage(err, 'Could not update this sale. Please try again.'));
     } finally {
@@ -1076,12 +1069,14 @@ function EditSaleForm({ sale, onSave, onCancel }) {
             </select>
           </Field>
           <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
-          <TwoWayPriceField
+          <PriceField
             label="Price"
             quantity={q}
             perUnit={perUnitPrice}
+            perTray={perTrayPrice}
             total={totalPrice}
             onPerUnitChange={handlePerUnitChange}
+            onPerTrayChange={handlePerTrayChange}
             onTotalChange={handleTotalChange}
             perUnitCaption="Per egg"
             totalCaption="Total sale"
@@ -1194,7 +1189,7 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
           <Field label="Quantity">
             <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
           </Field>
-          <TwoWayPriceField
+          <PriceField
             label="Price"
             quantity={q}
             perUnit={perUnitPrice}
@@ -1571,7 +1566,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
                         title={`${s.eggSize} · ${s.quantity} eggs`}
                         subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
                         description={s.description}
-                        amount={formatCurrency(s.quantity * s.pricePerEgg)}
+                        amount={formatCurrency(saleTotal(s))}
                         amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
                         badge={s.status === 'pending' && (
                           <span
@@ -1765,7 +1760,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
   // They still appear in the Records list so they can be tracked and paid.
   const paidSales = useMemo(() => sales.filter((s) => s.status !== 'pending'), [sales]);
 
-  const totalRevenue = useMemo(() => paidSales.reduce((s, x) => s + x.quantity * x.pricePerEgg, 0), [paidSales]);
+  const totalRevenue = useMemo(() => paidSales.reduce((s, x) => s + saleTotal(x), 0), [paidSales]);
   const totalExpenses = useMemo(() => expenses.reduce((s, x) => s + x.quantity * x.price, 0), [expenses]);
   const totalEggs = useMemo(() => paidSales.reduce((s, x) => s + x.quantity, 0), [paidSales]);
   const avgPricePerEgg = totalEggs ? totalRevenue / totalEggs : 0;
@@ -1799,7 +1794,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
     () => expenses.filter((e) => isInSelectedPeriod(e.date, avgGranularity, avgPeriodValue)),
     [expenses, avgGranularity, avgPeriodValue]
   );
-  const periodSalesTotal = avgPeriodSales.reduce((s, s2) => s + s2.quantity * s2.pricePerEgg, 0);
+  const periodSalesTotal = avgPeriodSales.reduce((s, s2) => s + saleTotal(s2), 0);
   const periodExpensesTotal = avgPeriodExpenses.reduce((s, e) => s + e.quantity * e.price, 0);
   const periodProfit = periodSalesTotal - periodExpensesTotal;
   const avgPeriodLabel = formatSelectedPeriodLabel(avgGranularity, avgPeriodValue);
