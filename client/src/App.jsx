@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { MotionConfig } from 'motion/react';
+import { ScreenTransition } from './components/MotionUI';
 import LoginPage from './LoginPage';
 import EggFarmDashboard from './EggFarmDashboard';
 import { COLORS } from './lib/theme';
 import { getCurrentUser, logout } from './lib/api';
 
 export default function App() {
+  return (
+    <MotionConfig reducedMotion="user">
+      <AppContent />
+    </MotionConfig>
+  );
+}
+
+function AppContent() {
   // 'checking' avoids a flash of the login page on every reload while we
   // ask the server if the existing cookie is still valid.
   const [status, setStatus] = useState('checking');
@@ -39,9 +49,11 @@ export default function App() {
     );
   }
 
-  if (status === 'anon') {
-    return <LoginPage onLoggedIn={(name) => { setUsername(name); setStatus('authed'); }} />;
-  }
-
-  return <EggFarmDashboard username={username} onLogout={handleLogout} />;
+  return (
+    <ScreenTransition viewKey={status}>
+      {status === 'anon'
+        ? <LoginPage onLoggedIn={(name) => { setUsername(name); setStatus('authed'); }} />
+        : <EggFarmDashboard username={username} onLogout={handleLogout} />}
+    </ScreenTransition>
+  );
 }

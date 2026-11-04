@@ -227,9 +227,25 @@ body {
   color: var(--eggy-ink);
 }
 .eggy-segment-item.is-active {
-  background-color: var(--eggy-card);
   color: var(--eggy-ink);
+}
+.eggy-segment-selection {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: var(--eggy-card);
   box-shadow: var(--eggy-elev-sm);
+  pointer-events: none;
+}
+.eggy-segment-count {
+  color: var(--eggy-muted);
+  font-variant-numeric: tabular-nums;
+}
+.eggy-record-segment .eggy-segment-item {
+  padding: 8px 6px;
+}
+@media (min-width: 400px) {
+  .eggy-record-segment .eggy-segment-item { font-size: 14px; }
 }
 
 /* ── Bottom tab bar ───────────────────────────────────────────────────── */
@@ -259,8 +275,18 @@ body {
   color: var(--eggy-barnwood);
 }
 .eggy-tab.is-active .eggy-tab-icon {
-  background-color: rgba(229, 166, 46, 0.17);
   transform: translateY(-1px);
+}
+.eggy-tab-selection {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 10px;
+  background-color: rgba(229, 166, 46, 0.17);
+  pointer-events: none;
+}
+.eggy-tab.is-active svg {
+  animation: eggy-icon-settle 360ms var(--eggy-ease-out);
 }
 .eggy-tab:active .eggy-tab-icon {
   transform: scale(0.9);
@@ -284,7 +310,32 @@ body {
 /* Entrance for cards and list rows. `both` holds the from-state before the
    delay elapses, so staggered items don't flash at full opacity first. */
 .eggy-rise {
-  animation: eggy-rise 460ms var(--eggy-ease-out) both;
+  animation: eggy-rise 380ms var(--eggy-ease-out) backwards;
+}
+
+/* Small, capped cascades keep the next field ready for a quick tap. */
+.eggy-form-flow > label,
+.eggy-form-flow > div:not(.eggy-feedback-slot),
+.eggy-form-flow > button {
+  animation: eggy-rise 320ms var(--eggy-ease-out) backwards;
+  animation-delay: 100ms;
+}
+.eggy-form-flow > :nth-child(1) { animation-delay: 0ms; }
+.eggy-form-flow > :nth-child(2) { animation-delay: 25ms; }
+.eggy-form-flow > :nth-child(3) { animation-delay: 50ms; }
+.eggy-form-flow > :nth-child(4) { animation-delay: 75ms; }
+
+.eggy-number { font-variant-numeric: tabular-nums; }
+.eggy-feedback-slot:empty { display: none; }
+.eggy-save-feedback {
+  overflow: hidden;
+  color: var(--eggy-moss);
+}
+
+@keyframes eggy-icon-settle {
+  0% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-2px) scale(1.08); }
+  100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes eggy-fade-in {
@@ -318,13 +369,16 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
   .eggy-card-interactive:hover,
+  .eggy-btn:active:not(:disabled),
   .eggy-press:active,
   .eggy-icon-btn:active,
+  .eggy-tab.is-active .eggy-tab-icon,
   .eggy-tab:active .eggy-tab-icon {
     transform: none;
   }

@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { LayoutGroup, motion, useReducedMotion } from 'motion/react';
+import { AnimatedNumber, SaveFeedback, ScreenTransition, SegmentedControl } from './components/MotionUI';
+import { SPRING } from './lib/motion';
 import {
   BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -6,7 +9,7 @@ import {
 import {
   DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
   LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, EggOff, LogOut,
-  CheckCircle2, Pencil, Search, X,
+  Pencil, Search, X,
 } from 'lucide-react';
 import * as api from './lib/api';
 import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle, ELEVATION, NUM_TABULAR } from './lib/theme';
@@ -48,6 +51,7 @@ const EXPENSE_COLORS = {
 
 const PERIOD_LIMITS = { daily: 30, weekly: 12, monthly: 12, yearly: 6 };
 const TRAY_SIZE = 30;
+const TAB_ORDER = ['dashboard', 'addSale', 'addExpense', 'addHarvest', 'records'];
 
 // Blank fields default to 0 (a partial "3 trays, no loose pcs" entry is
 // normal), but a genuinely invalid number (negative, non-integer) returns
@@ -368,7 +372,7 @@ function SyncBanner({ status }) {
 // `delay` staggers the entrance so the grid assembles rather than snapping
 // in all at once — the single cheapest thing that makes a screen feel built
 // rather than dumped.
-function StatCard({ icon, label, value, color, sub, delay = 0 }) {
+function StatCard({ icon, label, value, color, sub, delay = 0, format, suffix }) {
   return (
     <div className="eggy-card eggy-rise p-4" style={{ animationDelay: `${delay}ms` }}>
       <StampBadge icon={icon} color={color} size={38} />
@@ -382,7 +386,7 @@ function StatCard({ icon, label, value, color, sub, delay = 0 }) {
         className="text-xl font-bold mt-1"
         style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em', ...NUM_TABULAR }}
       >
-        {value}
+        <AnimatedNumber value={value} format={format} suffix={suffix} />
       </p>
       {sub && <p className="text-xs mt-0.5" style={{ color: COLORS.muted, fontFamily: FONT_BODY, ...NUM_TABULAR }}>{sub}</p>}
     </div>
@@ -423,7 +427,7 @@ function HeroStatCard({ icon, label, value, color, caption, positive }) {
             className="text-[2.1rem] font-bold mt-1 leading-none"
             style={{ color, fontFamily: FONT_DISPLAY, letterSpacing: '-0.02em' }}
           >
-            {value}
+            <AnimatedNumber value={value} format={formatCurrency} />
           </p>
           {caption && (
             <p className="text-xs mt-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, ...NUM_TABULAR }}>
@@ -451,28 +455,7 @@ function GranularityToggle({ value, onChange }) {
     { id: 'monthly', label: 'Month' },
     { id: 'yearly', label: 'Year' },
   ];
-  return (
-    <div className="eggy-segment flex">
-      {options.map((o) => {
-        const active = value === o.id;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => onChange(o.id)}
-            aria-pressed={active}
-            // The active state is a raised white pill on a recessed track,
-            // rather than a solid dark block — it reads as a physical
-            // selector instead of a pressed-looking button.
-            className={`eggy-segment-item eggy-focus px-3 py-1.5 text-xs ${active ? 'is-active' : ''}`}
-            style={{ fontFamily: FONT_BODY }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
+  return <SegmentedControl options={options} value={value} onChange={onChange} label="Time period" />;
 }
 
 // The amber size ramp runs from light to dark, so no single label colour
@@ -486,6 +469,7 @@ function labelInkFor(hex) {
 }
 
 function PieCard({ title, data, colors, empty, emptyText, valueFormatter }) {
+  const reducedMotion = useReducedMotion();
   // Percentages sit inside their slice rather than outside on leader lines,
   // which is what used to collide with the legend below (the "15%" landed
   // on top of the word "Large"). Slices under 6% are skipped — a label
@@ -520,6 +504,10 @@ function PieCard({ title, data, colors, empty, emptyText, valueFormatter }) {
         <ResponsiveContainer width="100%" height={230}>
           <PieChart>
             <Pie
+              isAnimationActive={!reducedMotion}
+              animationBegin={0}
+              animationDuration={500}
+              animationEasing="ease-out"
               data={data}
               dataKey="value"
               nameKey="name"
@@ -577,7 +565,7 @@ function MiniStatTile({ icon, label, value, color }) {
     <div className="rounded-xl p-3" style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.cardBorder}` }}>
       <StampBadge icon={icon} color={color} size={32} />
       <p className="text-xs mt-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{label}</p>
-      <p className="text-base font-bold mt-0.5 truncate" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>{value}</p>
+      <p className="text-base font-bold mt-0.5 truncate" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}><AnimatedNumber value={value} format={formatCurrency} /></p>
     </div>
   );
 }
@@ -604,12 +592,12 @@ function PeriodAverageCard({
         <>
           <p className="text-xs mb-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{avgPeriodLabel}</p>
           <div className="grid grid-cols-3 gap-2">
-            <MiniStatTile icon={<DollarSign size={16} />} label="Sales" value={formatCurrency(periodSalesTotal)} color={COLORS.moss} />
-            <MiniStatTile icon={<Receipt size={16} />} label="Expenses" value={formatCurrency(periodExpensesTotal)} color={COLORS.brick} />
+            <MiniStatTile icon={<DollarSign size={16} />} label="Sales" value={periodSalesTotal} color={COLORS.moss} />
+            <MiniStatTile icon={<Receipt size={16} />} label="Expenses" value={periodExpensesTotal} color={COLORS.brick} />
             <MiniStatTile
               icon={periodProfit >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
               label="Profit"
-              value={formatCurrency(periodProfit)}
+              value={periodProfit}
               color={periodProfit >= 0 ? COLORS.moss : COLORS.brick}
             />
           </div>
@@ -642,28 +630,30 @@ function DashboardView({
   periodProfit, avgPeriodCounts,
 }) {
   const granularityLabels = { daily: 'Day', weekly: 'Week', monthly: 'Month', yearly: 'Year' };
+  const reducedMotion = useReducedMotion();
 
   return (
     <div className="space-y-5">
       <HeroStatCard
         icon={netProfit >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
         label="Net Profit"
-        value={formatCurrency(netProfit)}
+        value={netProfit}
         color={netProfit >= 0 ? COLORS.moss : COLORS.brick}
         caption={`${formatCurrency(totalRevenue)} in · ${formatCurrency(totalExpenses)} out`}
         positive={netProfit >= 0}
       />
       <div className="grid grid-cols-2 gap-3">
-        <StatCard delay={60} icon={<DollarSign size={18} />} label="Revenue" value={formatCurrency(totalRevenue)} color={COLORS.moss} />
-        <StatCard delay={100} icon={<Receipt size={18} />} label="Expenses" value={formatCurrency(totalExpenses)} color={COLORS.brick} />
-        <StatCard delay={140} icon={<span className="text-sm">🥚</span>} label="Eggs Sold" value={totalEggs.toLocaleString()} color={COLORS.yolk} />
+        <StatCard delay={40} icon={<DollarSign size={18} />} label="Revenue" value={totalRevenue} format={formatCurrency} color={COLORS.moss} />
+        <StatCard delay={80} icon={<Receipt size={18} />} label="Expenses" value={totalExpenses} format={formatCurrency} color={COLORS.brick} />
+        <StatCard delay={120} icon={<span className="text-sm">🥚</span>} label="Eggs Sold" value={totalEggs} color={COLORS.yolk} />
         {/* Harvested and rejected are one measurement pair, so they share a
             card — as two separate tiles they left an orphan in the grid. */}
         <StatCard
-          delay={180}
+          delay={160}
           icon={<Egg size={18} />}
           label="Avg Harvest"
-          value={`${avgHarvested.toLocaleString()} eggs`}
+          value={avgHarvested}
+          suffix=" eggs"
           color={COLORS.moss}
           sub={`${avgRejected.toLocaleString()} rejected`}
         />
@@ -698,8 +688,8 @@ function DashboardView({
                     contentStyle={{ borderRadius: 8, border: `1px solid ${COLORS.cardBorder}`, fontSize: 12, fontFamily: FONT_BODY }}
                   />
                   <Legend wrapperStyle={{ fontSize: 12, fontFamily: FONT_BODY }} formatter={(v) => (v === 'revenue' ? 'Revenue' : 'Expenses')} />
-                  <Bar dataKey="revenue" fill={COLORS.moss} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="revenue" fill={COLORS.moss} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={500} animationEasing="ease-out" />
+                  <Bar dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={500} animationBegin={60} animationEasing="ease-out" />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -846,7 +836,7 @@ function AddSaleForm({ onSubmit }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Plus size={16} style={{ color: COLORS.moss }} /> Record a Sale
       </h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
         <Field label="Egg size">
           <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
             {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -882,12 +872,7 @@ function AddSaleForm({ onSubmit }) {
           </span>
         </label>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        {success && (
-          <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
-            <CheckCircle2 size={16} />
-            <p className="text-sm font-medium">{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</p>
-          </div>
-        )}
+        <SaveFeedback visible={success}>{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</SaveFeedback>
         <button
           type="submit"
           className={`eggy-btn eggy-focus w-full py-3 text-sm ${isPending ? 'eggy-btn-accent' : 'eggy-btn-primary'}`}
@@ -956,7 +941,7 @@ function AddExpenseForm({ onSubmit }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Wallet size={16} style={{ color: COLORS.brick }} /> Record an Expense
       </h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
         <Field label="Item">
           <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
             {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -982,12 +967,7 @@ function AddExpenseForm({ onSubmit }) {
           <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
         </Field>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        {success && (
-          <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
-            <CheckCircle2 size={16} />
-            <p className="text-sm font-medium">Expense recorded.</p>
-          </div>
-        )}
+        <SaveFeedback visible={success}>Expense recorded.</SaveFeedback>
         <button
           type="submit"
           className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
@@ -1053,7 +1033,7 @@ function EditSaleForm({ sale, onSave, onCancel }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Pencil size={16} style={{ color: COLORS.moss }} /> Edit Sale
       </h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
         <Field label="Egg size">
           <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
             {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1161,7 +1141,7 @@ function EditExpenseForm({ expense, onSave, onCancel }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Pencil size={16} style={{ color: COLORS.brick }} /> Edit Expense
       </h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
         <Field label="Item">
           <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
             {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1248,19 +1228,14 @@ function AddHarvestForm({ onSubmit }) {
       <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
         <Egg size={16} style={{ color: COLORS.yolk }} /> Record a Harvest
       </h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="eggy-form-flow space-y-4">
         <TrayPcsField label="Eggs harvested" trays={harvestedTrays} pcs={harvestedPcs} onTraysChange={setHarvestedTrays} onPcsChange={setHarvestedPcs} unitLabel="eggs" />
         <TrayPcsField label="Eggs rejected" trays={rejectedTrays} pcs={rejectedPcs} onTraysChange={setRejectedTrays} onPcsChange={setRejectedPcs} unitLabel="eggs" />
         <Field label="Date">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
         </Field>
         {formError && <p className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-        {success && (
-          <div className="flex items-center gap-1.5 eggy-anim-pop-in" style={{ color: COLORS.moss }}>
-            <CheckCircle2 size={16} />
-            <p className="text-sm font-medium">Harvest recorded.</p>
-          </div>
-        )}
+        <SaveFeedback visible={success}>Harvest recorded.</SaveFeedback>
         <button
           type="submit"
           className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
@@ -1295,6 +1270,7 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
         // scannable down the list without reading a single figure.
         borderLeft: `3px solid ${amountColor}`,
         animationDelay: `${delay}ms`,
+        animationName: removing ? 'none' : undefined,
         ...(removing ? { marginTop: 0, paddingTop: 0, paddingBottom: 0 } : null),
       }}
     >
@@ -1373,6 +1349,8 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
 
 function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest, onUpdateSaleStatus, onUpdateSale, onUpdateExpense }) {
   const [subTab, setSubTab] = useState('sales');
+  const [direction, setDirection] = useState(1);
+  const reducedMotion = useReducedMotion();
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -1417,7 +1395,7 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         else if (tab === 'expenses') onDeleteExpense(id);
         else onDeleteHarvest(id);
         setRemovingId(null);
-      }, 260);
+      }, reducedMotion ? 0 : 260);
     } else {
       setConfirmId(id);
     }
@@ -1437,193 +1415,194 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
     <div className="space-y-3">
       {/* Sticky so you can switch ledgers without scrolling back up through
           forty-odd rows first. */}
-      <div className="eggy-segment flex sticky top-[76px] z-10" style={{ boxShadow: ELEVATION.sm }}>
-        {[
+      <SegmentedControl
+        className="eggy-record-segment sticky top-[76px] z-10"
+        style={{ boxShadow: ELEVATION.sm }}
+        label="Record type"
+        value={subTab}
+        onChange={(next) => {
+          const order = ['sales', 'expenses', 'harvests'];
+          setDirection(order.indexOf(next) > order.indexOf(subTab) ? 1 : -1);
+          setSubTab(next);
+          setConfirmId(null);
+          setEditingId(null);
+        }}
+        options={[
           { id: 'sales', label: 'Sales', count: sales.length },
           { id: 'expenses', label: 'Expenses', count: expenses.length },
           { id: 'harvests', label: 'Harvests', count: harvests.length },
-        ].map((t) => {
-          const active = subTab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => { setSubTab(t.id); setConfirmId(null); setEditingId(null); }}
-              aria-pressed={active}
-              className={`eggy-segment-item eggy-focus flex-1 py-2 text-sm ${active ? 'is-active' : ''}`}
-              style={{ fontFamily: FONT_BODY }}
-            >
-              {t.label}{' '}
-              <span style={{ color: active ? COLORS.muted : COLORS.muted, ...NUM_TABULAR }}>({t.count})</span>
-            </button>
-          );
-        })}
-      </div>
+        ]}
+      />
 
-      {subTab === 'sales' && sales.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[160px]">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: COLORS.muted }} />
-            <input
-              type="text"
-              value={saleSearch}
-              onChange={(e) => setSaleSearch(e.target.value)}
-              placeholder="Search description…"
-              aria-label="Search sales by description"
-              className={inputClasses}
-              style={{ ...inputStyle, paddingLeft: 36, paddingRight: saleSearch ? 36 : undefined }}
-            />
-            {saleSearch && (
-              <button
-                type="button"
-                onClick={() => setSaleSearch('')}
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 eggy-icon-btn eggy-focus"
-                style={{ padding: 4 }}
+      <ScreenTransition viewKey={subTab} direction={direction}>
+        <div className="space-y-3">
+          {subTab === 'sales' && sales.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[160px]">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: COLORS.muted }} />
+                <input
+                  type="text"
+                  value={saleSearch}
+                  onChange={(e) => setSaleSearch(e.target.value)}
+                  placeholder="Search description…"
+                  aria-label="Search sales by description"
+                  className={inputClasses}
+                  style={{ ...inputStyle, paddingLeft: 36, paddingRight: saleSearch ? 36 : undefined }}
+                />
+                {saleSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setSaleSearch('')}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 eggy-icon-btn eggy-focus"
+                    style={{ padding: 4 }}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <select
+                value={saleStatusFilter}
+                onChange={(e) => setSaleStatusFilter(e.target.value)}
+                aria-label="Filter sales by status"
+                className={inputClasses}
+                style={{ ...inputStyle, width: 'auto' }}
               >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-          <select
-            value={saleStatusFilter}
-            onChange={(e) => setSaleStatusFilter(e.target.value)}
-            aria-label="Filter sales by status"
-            className={inputClasses}
-            style={{ ...inputStyle, width: 'auto' }}
-          >
-            <option value="all">All statuses</option>
-            <option value="paid">Paid</option>
-            <option value="pending">Pending</option>
-          </select>
+                <option value="all">All statuses</option>
+                <option value="paid">Paid</option>
+                <option value="pending">Pending</option>
+              </select>
+            </div>
+          )}
+
+          {subTab === 'sales' && (
+            sortedSales.length === 0 ? (
+              <EmptyRecords text="No sales recorded yet." />
+            ) : filteredSales.length === 0 ? (
+              <EmptyRecords text="No sales match your search." />
+            ) : (
+              <div className="space-y-2">
+                {filteredSales.map((s, i) => (
+                  editingId === s.id ? (
+                    <EditSaleForm
+                      key={s.id}
+                      sale={s}
+                      onSave={(fields) => handleSaveSale(s.id, fields)}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <RecordRow
+                      key={s.id}
+                      delay={rowDelay(i)}
+                      title={`${s.eggSize} · ${s.quantity} eggs`}
+                      subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
+                      description={s.description}
+                      amount={formatCurrency(s.quantity * s.pricePerEgg)}
+                      amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
+                      badge={s.status === 'pending' && (
+                        <span
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase"
+                          style={{
+                            backgroundColor: `${COLORS.yolk}24`,
+                            color: COLORS.yolkDeep,
+                            fontFamily: FONT_BODY,
+                            letterSpacing: '0.06em',
+                          }}
+                        >
+                          Unpaid
+                        </span>
+                      )}
+                      // Only unpaid sales carry an inline status button: settling
+                      // one is the action that actually gets taken. Putting the
+                      // reverse on all ~40 settled rows cost each of them a whole
+                      // extra line for a correction that's rare — it's still
+                      // available through Edit, which has the same checkbox.
+                      secondaryAction={s.status === 'pending' ? (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSaleStatus(s.id, 'paid')}
+                          className="eggy-btn eggy-btn-accent eggy-focus text-xs px-3 py-1.5 whitespace-nowrap"
+                          style={{ fontFamily: FONT_BODY }}
+                        >
+                          Mark Paid
+                        </button>
+                      ) : null}
+                      confirming={confirmId === s.id}
+                      removing={removingId === s.id}
+                      onEditClick={() => setEditingId(s.id)}
+                      onDeleteClick={() => handleDeleteClick(s.id)}
+                      onCancel={() => setConfirmId(null)}
+                    />
+                  )
+                ))}
+              </div>
+            )
+          )}
+
+          {subTab === 'expenses' && (
+            sortedExpenses.length === 0 ? (
+              <EmptyRecords text="No expenses recorded yet." />
+            ) : (
+              <div className="space-y-2">
+                {sortedExpenses.map((e, i) => (
+                  editingId === e.id ? (
+                    <EditExpenseForm
+                      key={e.id}
+                      expense={e}
+                      onSave={(fields) => handleSaveExpense(e.id, fields)}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <RecordRow
+                      key={e.id}
+                      delay={rowDelay(i)}
+                      title={`${e.item} · ${e.quantity}x`}
+                      subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
+                      description={e.description}
+                      amount={formatCurrency(e.quantity * e.price)}
+                      amountColor={COLORS.brick}
+                      confirming={confirmId === e.id}
+                      removing={removingId === e.id}
+                      onEditClick={() => setEditingId(e.id)}
+                      onDeleteClick={() => handleDeleteClick(e.id)}
+                      onCancel={() => setConfirmId(null)}
+                    />
+                  )
+                ))}
+              </div>
+            )
+          )}
+
+          {subTab === 'harvests' && (
+            sortedHarvests.length === 0 ? (
+              <EmptyRecords text="No harvests recorded yet." />
+            ) : (
+              <div className="space-y-2">
+                {sortedHarvests.map((h, i) => (
+                  <RecordRow
+                    key={h.id}
+                    delay={rowDelay(i)}
+                    title={`${h.harvested} eggs harvested`}
+                    subtitle={`${formatDateDisplay(h.date)} · ${h.rejected} rejected`}
+                    amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
+                    amountColor={COLORS.moss}
+                    confirming={confirmId === h.id}
+                    removing={removingId === h.id}
+                    onDeleteClick={() => handleDeleteClick(h.id)}
+                    onCancel={() => setConfirmId(null)}
+                  />
+                ))}
+              </div>
+            )
+          )}
         </div>
-      )}
-
-      {subTab === 'sales' && (
-        sortedSales.length === 0 ? (
-          <EmptyRecords text="No sales recorded yet." />
-        ) : filteredSales.length === 0 ? (
-          <EmptyRecords text="No sales match your search." />
-        ) : (
-          <div className="space-y-2">
-            {filteredSales.map((s, i) => (
-              editingId === s.id ? (
-                <EditSaleForm
-                  key={s.id}
-                  sale={s}
-                  onSave={(fields) => handleSaveSale(s.id, fields)}
-                  onCancel={() => setEditingId(null)}
-                />
-              ) : (
-                <RecordRow
-                  key={s.id}
-                  delay={rowDelay(i)}
-                  title={`${s.eggSize} · ${s.quantity} eggs`}
-                  subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
-                  description={s.description}
-                  amount={formatCurrency(s.quantity * s.pricePerEgg)}
-                  amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
-                  badge={s.status === 'pending' && (
-                    <span
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase"
-                      style={{
-                        backgroundColor: `${COLORS.yolk}24`,
-                        color: COLORS.yolkDeep,
-                        fontFamily: FONT_BODY,
-                        letterSpacing: '0.06em',
-                      }}
-                    >
-                      Unpaid
-                    </span>
-                  )}
-                  // Only unpaid sales carry an inline status button: settling
-                  // one is the action that actually gets taken. Putting the
-                  // reverse on all ~40 settled rows cost each of them a whole
-                  // extra line for a correction that's rare — it's still
-                  // available through Edit, which has the same checkbox.
-                  secondaryAction={s.status === 'pending' ? (
-                    <button
-                      type="button"
-                      onClick={() => onUpdateSaleStatus(s.id, 'paid')}
-                      className="eggy-btn eggy-btn-accent eggy-focus text-xs px-3 py-1.5 whitespace-nowrap"
-                      style={{ fontFamily: FONT_BODY }}
-                    >
-                      Mark Paid
-                    </button>
-                  ) : null}
-                  confirming={confirmId === s.id}
-                  removing={removingId === s.id}
-                  onEditClick={() => setEditingId(s.id)}
-                  onDeleteClick={() => handleDeleteClick(s.id)}
-                  onCancel={() => setConfirmId(null)}
-                />
-              )
-            ))}
-          </div>
-        )
-      )}
-
-      {subTab === 'expenses' && (
-        sortedExpenses.length === 0 ? (
-          <EmptyRecords text="No expenses recorded yet." />
-        ) : (
-          <div className="space-y-2">
-            {sortedExpenses.map((e, i) => (
-              editingId === e.id ? (
-                <EditExpenseForm
-                  key={e.id}
-                  expense={e}
-                  onSave={(fields) => handleSaveExpense(e.id, fields)}
-                  onCancel={() => setEditingId(null)}
-                />
-              ) : (
-                <RecordRow
-                  key={e.id}
-                  delay={rowDelay(i)}
-                  title={`${e.item} · ${e.quantity}x`}
-                  subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
-                  description={e.description}
-                  amount={formatCurrency(e.quantity * e.price)}
-                  amountColor={COLORS.brick}
-                  confirming={confirmId === e.id}
-                  removing={removingId === e.id}
-                  onEditClick={() => setEditingId(e.id)}
-                  onDeleteClick={() => handleDeleteClick(e.id)}
-                  onCancel={() => setConfirmId(null)}
-                />
-              )
-            ))}
-          </div>
-        )
-      )}
-
-      {subTab === 'harvests' && (
-        sortedHarvests.length === 0 ? (
-          <EmptyRecords text="No harvests recorded yet." />
-        ) : (
-          <div className="space-y-2">
-            {sortedHarvests.map((h, i) => (
-              <RecordRow
-                key={h.id}
-                delay={rowDelay(i)}
-                title={`${h.harvested} eggs harvested`}
-                subtitle={`${formatDateDisplay(h.date)} · ${h.rejected} rejected`}
-                amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
-                amountColor={COLORS.moss}
-                confirming={confirmId === h.id}
-                removing={removingId === h.id}
-                onDeleteClick={() => handleDeleteClick(h.id)}
-                onCancel={() => setConfirmId(null)}
-              />
-            ))}
-          </div>
-        )
-      )}
+      </ScreenTransition>
     </div>
   );
 }
 
 function TabBar({ tab, setTab }) {
+  const reducedMotion = useReducedMotion();
   // Short labels: five cells across a 390px phone gives each ~78px, and the
   // old "Add Expense"/"Add Harvest" ran into each other with no gap. The
   // icon already carries the "add" sense, so the noun alone is enough — the
@@ -1636,33 +1615,40 @@ function TabBar({ tab, setTab }) {
     { id: 'records', label: 'Records', title: 'Records', icon: ClipboardList },
   ];
   return (
-    <nav className="eggy-tabbar fixed bottom-0 left-0 right-0 z-20">
-      <div className="max-w-4xl mx-auto grid grid-cols-5">
-        {tabs.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              aria-label={t.title}
-              aria-current={active ? 'page' : undefined}
-              // The active tab gets a tinted pill behind its icon that lifts
-              // slightly — a clearer, more physical "you are here" than a
-              // colour change alone.
-              className={`eggy-tab eggy-focus flex flex-col items-center gap-1 pt-2 pb-2.5 px-1 text-[11px] font-medium ${active ? 'is-active' : ''}`}
-              style={{ fontFamily: FONT_BODY }}
-            >
-              <span className="eggy-tab-icon flex items-center justify-center">
-                <Icon size={19} strokeWidth={active ? 2.4 : 2} />
-              </span>
-              <span className="truncate max-w-full">{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
+    <LayoutGroup id="main-navigation">
+      <motion.nav layoutRoot aria-label="Main navigation" className="eggy-tabbar fixed bottom-0 left-0 right-0 z-20">
+        <div className="max-w-4xl mx-auto grid grid-cols-5">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => tab !== t.id && setTab(t.id)}
+                aria-label={t.title}
+                aria-current={active ? 'page' : undefined}
+                className={`eggy-tab eggy-focus flex flex-col items-center gap-1 pt-2 pb-2.5 px-1 text-[11px] font-medium ${active ? 'is-active' : ''}`}
+                style={{ fontFamily: FONT_BODY }}
+              >
+                <span className="eggy-tab-icon relative isolate flex items-center justify-center">
+                  {active && (
+                    <motion.span
+                      layoutId="active-tab"
+                      className="eggy-tab-selection"
+                      transition={reducedMotion ? { duration: 0 } : SPRING}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+                </span>
+                <span className="truncate max-w-full">{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </motion.nav>
+    </LayoutGroup>
   );
 }
 
@@ -1672,6 +1658,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
   const [harvests, setHarvests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('dashboard');
+  const [direction, setDirection] = useState(1);
   const [granularity, setGranularity] = useState('daily');
   const [error, setErrorMsg] = useState('');
   const [avgGranularity, setAvgGranularity] = useState('daily');
@@ -2016,53 +2003,58 @@ export default function EggFarmDashboard({ username, onLogout }) {
       <main className="max-w-4xl mx-auto px-4 pt-4">
         <SyncBanner status={syncStatus} />
         {error && <ErrorBanner message={error} onClose={() => setErrorMsg('')} />}
-        {tab === 'dashboard' && (
-          <DashboardView
-            totalRevenue={totalRevenue}
-            totalExpenses={totalExpenses}
-            netProfit={netProfit}
-            totalEggs={totalEggs}
-            avgPricePerEgg={avgPricePerEgg}
-            avgRevenuePerPeriod={avgRevenuePerPeriod}
-            granularity={granularity}
-            setGranularity={setGranularity}
-            chartData={chartData}
-            sizeBreakdown={sizeBreakdown}
-            expenseBreakdown={expenseBreakdown}
-            hasSales={sales.length > 0}
-            hasExpenses={expenses.length > 0}
-            avgHarvested={avgHarvested}
-            avgRejected={avgRejected}
-            avgGranularity={avgGranularity}
-            onAvgGranularityChange={handleAvgGranularityChange}
-            avgPeriodValue={avgPeriodValue}
-            onAvgPeriodValueChange={setAvgPeriodValue}
-            availableYears={availableYears}
-            avgPeriodLabel={avgPeriodLabel}
-            periodSalesTotal={periodSalesTotal}
-            periodExpensesTotal={periodExpensesTotal}
-            periodProfit={periodProfit}
-            avgPeriodCounts={avgPeriodCounts}
-          />
-        )}
-        {tab === 'addSale' && <AddSaleForm onSubmit={addSale} />}
-        {tab === 'addExpense' && <AddExpenseForm onSubmit={addExpense} />}
-        {tab === 'addHarvest' && <AddHarvestForm onSubmit={addHarvest} />}
-        {tab === 'records' && (
-          <RecordsView
-            sales={sales}
-            expenses={expenses}
-            harvests={harvests}
-            onDeleteSale={deleteSale}
-            onDeleteExpense={deleteExpense}
-            onDeleteHarvest={deleteHarvest}
-            onUpdateSaleStatus={updateSaleStatus}
-            onUpdateSale={updateSale}
-            onUpdateExpense={updateExpense}
-          />
-        )}
+        <ScreenTransition viewKey={tab} direction={direction} resetScroll>
+          {tab === 'dashboard' && (
+            <DashboardView
+              totalRevenue={totalRevenue}
+              totalExpenses={totalExpenses}
+              netProfit={netProfit}
+              totalEggs={totalEggs}
+              avgPricePerEgg={avgPricePerEgg}
+              avgRevenuePerPeriod={avgRevenuePerPeriod}
+              granularity={granularity}
+              setGranularity={setGranularity}
+              chartData={chartData}
+              sizeBreakdown={sizeBreakdown}
+              expenseBreakdown={expenseBreakdown}
+              hasSales={sales.length > 0}
+              hasExpenses={expenses.length > 0}
+              avgHarvested={avgHarvested}
+              avgRejected={avgRejected}
+              avgGranularity={avgGranularity}
+              onAvgGranularityChange={handleAvgGranularityChange}
+              avgPeriodValue={avgPeriodValue}
+              onAvgPeriodValueChange={setAvgPeriodValue}
+              availableYears={availableYears}
+              avgPeriodLabel={avgPeriodLabel}
+              periodSalesTotal={periodSalesTotal}
+              periodExpensesTotal={periodExpensesTotal}
+              periodProfit={periodProfit}
+              avgPeriodCounts={avgPeriodCounts}
+            />
+          )}
+          {tab === 'addSale' && <AddSaleForm onSubmit={addSale} />}
+          {tab === 'addExpense' && <AddExpenseForm onSubmit={addExpense} />}
+          {tab === 'addHarvest' && <AddHarvestForm onSubmit={addHarvest} />}
+          {tab === 'records' && (
+            <RecordsView
+              sales={sales}
+              expenses={expenses}
+              harvests={harvests}
+              onDeleteSale={deleteSale}
+              onDeleteExpense={deleteExpense}
+              onDeleteHarvest={deleteHarvest}
+              onUpdateSaleStatus={updateSaleStatus}
+              onUpdateSale={updateSale}
+              onUpdateExpense={updateExpense}
+            />
+          )}
+        </ScreenTransition>
       </main>
-      <TabBar tab={tab} setTab={setTab} />
+      <TabBar tab={tab} setTab={(next) => {
+        setDirection(TAB_ORDER.indexOf(next) > TAB_ORDER.indexOf(tab) ? 1 : -1);
+        setTab(next);
+      }} />
     </div>
   );
 }

@@ -25,7 +25,7 @@ export default function LoginPage({ onLoggedIn }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: COLORS.paper }}>
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm eggy-rise">
         <div className="flex flex-col items-center mb-6">
           <div
             className="w-14 h-14 rounded-full flex items-center justify-center mb-3"
@@ -41,12 +41,13 @@ export default function LoginPage({ onLoggedIn }) {
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl p-5 shadow-sm space-y-4"
+          className="eggy-form-flow rounded-2xl p-5 shadow-sm space-y-4"
           style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}
         >
           {error && (
             <div
-              className="text-sm rounded-lg px-3 py-2"
+              role="alert"
+              className="eggy-fade-in text-sm rounded-lg px-3 py-2"
               style={{ backgroundColor: '#F7E6E1', border: `1px solid ${COLORS.brick}55`, color: COLORS.brick, fontFamily: FONT_BODY }}
             >
               {error}
@@ -82,7 +83,7 @@ export default function LoginPage({ onLoggedIn }) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+            className="eggy-btn eggy-btn-primary eggy-focus w-full font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
             style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
           >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : <Lock size={16} />}
