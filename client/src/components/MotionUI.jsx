@@ -22,11 +22,11 @@ function Screen({ children, direction }) {
       custom={direction}
       variants={{
         enter: (dir) => ({ opacity: reducedMotion ? 1 : 0, x: reducedMotion ? 0 : dir * 14 }),
-        visible: { opacity: 1, x: 0, transition: { duration: reducedMotion ? 0 : 0.28, ease: EASE } },
+        visible: { opacity: 1, x: 0, transition: { duration: reducedMotion ? 0 : 0.36, ease: EASE } },
         leave: (dir) => ({
           opacity: reducedMotion ? 1 : 0,
           x: reducedMotion ? 0 : dir * -8,
-          transition: { duration: reducedMotion ? 0 : 0.1, ease: 'easeOut' },
+          transition: { duration: reducedMotion ? 0 : 0.13, ease: 'easeOut' },
         }),
       }}
       initial="enter"
@@ -95,7 +95,7 @@ export function AnimatedNumber({ value, format = formatCount, suffix = '' }) {
       current.set(value);
       return;
     }
-    const animation = animate(current, value, { duration: 0.48, ease: EASE });
+    const animation = animate(current, value, { duration: 0.62, ease: EASE });
     return () => animation.stop();
   }, [current, value, reducedMotion]);
   return (
@@ -117,7 +117,7 @@ export function SaveFeedback({ visible, children }) {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: reducedMotion ? 0 : 0.2, ease: EASE }}
+            transition={{ duration: reducedMotion ? 0 : 0.26, ease: EASE }}
           >
             <div className="flex items-center gap-1.5 py-1">
               <motion.span

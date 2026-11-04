@@ -511,7 +511,7 @@ function PieCard({ title, data, colors, empty, emptyText, valueFormatter }) {
             <Pie
               isAnimationActive={!reducedMotion}
               animationBegin={0}
-              animationDuration={500}
+              animationDuration={650}
               animationEasing="ease-out"
               data={data}
               dataKey="value"
@@ -693,8 +693,8 @@ function DashboardView({
                     contentStyle={{ borderRadius: 8, border: `1px solid ${COLORS.cardBorder}`, fontSize: 12, fontFamily: FONT_BODY }}
                   />
                   <Legend wrapperStyle={{ fontSize: 12, fontFamily: FONT_BODY }} formatter={(v) => (v === 'revenue' ? 'Revenue' : 'Expenses')} />
-                  <Bar dataKey="revenue" fill={COLORS.moss} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={500} animationEasing="ease-out" />
-                  <Bar dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={500} animationBegin={60} animationEasing="ease-out" />
+                  <Bar dataKey="revenue" fill={COLORS.moss} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={650} animationEasing="ease-out" />
+                  <Bar dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={650} animationBegin={60} animationEasing="ease-out" />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1321,8 +1321,8 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
       className="eggy-card-flush eggy-card-interactive px-4 py-3"
       aria-busy={busy || removing}
       initial={{ opacity: reducedMotion ? 1 : 0, y: reducedMotion ? 0 : 6 }}
-      animate={{ opacity: 1, y: 0, transition: { duration: reducedMotion ? 0 : 0.24, delay: reducedMotion ? 0 : delay / 1000 } }}
-      exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0, transition: { duration: reducedMotion ? 0 : 0.2 } }}
+      animate={{ opacity: 1, y: 0, transition: { duration: reducedMotion ? 0 : 0.31, delay: reducedMotion ? 0 : delay / 1000 } }}
+      exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0, transition: { duration: reducedMotion ? 0 : 0.26 } }}
       transition={{ layout: reducedMotion ? { duration: 0 } : SPRING }}
       style={{
         overflow: 'hidden',

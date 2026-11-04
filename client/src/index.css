@@ -264,10 +264,10 @@ body {
 
 .eggy-tab {
   color: var(--eggy-muted);
-  transition: color 200ms var(--eggy-ease-out);
+  transition: color 260ms var(--eggy-ease-out);
 }
 .eggy-tab .eggy-tab-icon {
-  transition: transform 260ms var(--eggy-ease-spring), background-color 200ms var(--eggy-ease-out);
+  transition: transform 340ms var(--eggy-ease-spring), background-color 260ms var(--eggy-ease-out);
   border-radius: 10px;
   padding: 4px 12px;
 }
@@ -286,7 +286,7 @@ body {
   pointer-events: none;
 }
 .eggy-tab.is-active svg {
-  animation: eggy-icon-settle 360ms var(--eggy-ease-out);
+  animation: eggy-icon-settle 470ms var(--eggy-ease-out);
 }
 .eggy-tab:active .eggy-tab-icon {
   transform: scale(0.9);
@@ -300,24 +300,24 @@ body {
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 .eggy-anim-pop-in {
-  animation: eggy-pop-in 320ms var(--eggy-ease-spring);
+  animation: eggy-pop-in 420ms var(--eggy-ease-spring);
 }
 
 @keyframes eggy-rise {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
-/* Entrance for cards and list rows. `both` holds the from-state before the
-   delay elapses, so staggered items don't flash at full opacity first. */
+/* `backwards` holds the starting pose during the delay, then releases the
+   transform when the entrance ends so later interactions can animate it. */
 .eggy-rise {
-  animation: eggy-rise 380ms var(--eggy-ease-out) backwards;
+  animation: eggy-rise 500ms var(--eggy-ease-out) backwards;
 }
 
 /* Small, capped cascades keep the next field ready for a quick tap. */
 .eggy-form-flow > label,
 .eggy-form-flow > div:not(.eggy-feedback-slot),
 .eggy-form-flow > button {
-  animation: eggy-rise 320ms var(--eggy-ease-out) backwards;
+  animation: eggy-rise 420ms var(--eggy-ease-out) backwards;
   animation-delay: 100ms;
 }
 .eggy-form-flow > :nth-child(1) { animation-delay: 0ms; }
@@ -343,7 +343,7 @@ body {
   to { opacity: 1; }
 }
 .eggy-fade-in {
-  animation: eggy-fade-in 300ms var(--eggy-ease-out) both;
+  animation: eggy-fade-in 390ms var(--eggy-ease-out) both;
 }
 
 @keyframes eggy-shimmer {
@@ -355,7 +355,7 @@ body {
   background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
   background-size: 180% 100%;
   background-repeat: no-repeat;
-  animation: eggy-shimmer 1.5s ease-in-out infinite;
+  animation: eggy-shimmer 1.8s ease-in-out infinite;
   border-radius: 8px;
 }
 
