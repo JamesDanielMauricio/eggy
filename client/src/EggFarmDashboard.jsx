@@ -1,59 +1,76 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/react';
-import { AnimatedNumber, SaveFeedback, ScreenTransition, SegmentedControl } from './components/MotionUI';
-import { SPRING } from './lib/motion';
 import {
-  BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
-} from 'recharts';
-import {
-  DollarSign, TrendingUp, TrendingDown, Receipt, Plus, Trash2,
-  LayoutDashboard, ClipboardList, Wallet, Loader2, Egg, LogOut,
-  Pencil, Search, X,
+  CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Egg, LayoutDashboard, Loader2,
+  LogOut, Pencil, Plus, Search, Trash2, TrendingDown, TrendingUp, Wallet, X,
 } from 'lucide-react';
+import { AnimatedNumber, SaveFeedback, ScreenTransition, SegmentedControl } from './components/MotionUI';
+import BrandMark from './components/BrandMark';
 import * as api from './lib/api';
 import { useLedger } from './lib/useLedger';
 import { TRAY_SIZE, saleTotal } from './lib/salePricing';
 import { useSalePricing } from './lib/useSalePricing';
-import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle, ELEVATION, NUM_TABULAR } from './lib/theme';
+import { SPRING } from './lib/motion';
+import { CHART, COLORS, ELEVATION, inputClasses } from './lib/theme';
+import {
+  CURRENCY, formatCount, formatCurrency, formatShare, formatShortDate, formatTrays, formatWeekday,
+} from './lib/format';
+import {
+  aggregateByPeriod, formatSelectedPeriodLabel, getPeriodDefaultValue, getTodayLocal,
+  isInSelectedPeriod, stepPeriod,
+} from './lib/periods';
+import { breakdown } from './lib/rows';
+import { getLoadedTrendChart, loadTrendChart } from './lib/charts';
 
 const EGG_SIZES = ['Extra Small', 'Small', 'Medium', 'Large', 'Extra Large', 'Jumbo', 'Reject'];
+// Phone-width chip labels, so all seven sizes fit in two even rows.
+const EGG_SIZE_SHORT = { 'Extra Small': 'X-Small', 'Extra Large': 'X-Large' };
 const EXPENSE_ITEMS = ['Feeds', 'Fly Trap', 'Medicines/Vitamins', 'Others'];
-const CURRENCY = '₱';
-
-// Egg sizes are an ordered scale, so they get a single-hue amber ramp that
-// runs light→dark with the size. Stepped so each grade is visibly distinct
-// from its neighbour and the lightest still reads against the cream card —
-// the old ramp's 'Extra Small' sat at 1.39:1 on this background (all but
-// invisible) and 'Small'/'Medium' were too close to tell apart.
-// Reject is deliberately outside the ramp: it isn't a size grade, so it
-// stays neutral gray rather than borrowing a position on the scale.
-const EGG_SIZE_COLORS = {
-  'Extra Small': '#D3A94E',
-  'Small': '#C08C2C',
-  'Medium': '#A8701D',
-  'Large': '#8A5318',
-  'Extra Large': '#653B14',
-  'Jumbo': '#3E230E',
-  'Reject': '#8B8577',
-};
-
-// Expense categories have no natural order, so these are four distinct hues
-// rather than a ramp. Checked against the cream chart surface for
-// colour-blind separation: the previous green/teal pair was only ΔE 12.7
-// apart for normal vision (below the 15 floor — genuinely hard to tell
-// apart), and three of the four were desaturated enough to read as gray.
-// Green↔brick still sits in the deuteranopia warn band, which is why every
-// slice carries a printed percentage as well as its colour.
-const EXPENSE_COLORS = {
-  'Feeds': '#4E8B2B',
-  'Fly Trap': '#2B6096',
-  'Medicines/Vitamins': '#A83C25',
-  'Others': '#D19A22',
-};
-
-const PERIOD_LIMITS = { daily: 30, weekly: 12, monthly: 12, yearly: 6 };
 const TAB_ORDER = ['dashboard', 'addSale', 'addExpense', 'addHarvest', 'records'];
+const RECORD_TABS = ['sales', 'expenses', 'harvests'];
+
+// The records list mounts this many rows at a time; "Show more" adds the
+// next batch. Every mounted row is re-measured for its layout animation
+// whenever the list changes (that's how rows glide into place after a
+// delete), so capping the mounted rows keeps each tap and keystroke equally
+// quick whether the ledger holds 50 entries or 5,000.
+const PAGE_SIZE = 30;
+
+const GRANULARITIES = [
+  { id: 'daily', label: 'Day' },
+  { id: 'weekly', label: 'Week' },
+  { id: 'monthly', label: 'Month' },
+  { id: 'yearly', label: 'Year' },
+];
+const PERIOD_NOUN = { daily: 'day', weekly: 'week', monthly: 'month', yearly: 'year' };
+const PAYMENT_OPTIONS = [
+  { id: 'paid', label: 'Paid' },
+  { id: 'pending', label: 'Pending (utang)' },
+];
+
+// Built once at load time. The dashboard cards are memoized, and a fresh
+// `<TrendingUp />` element on every render would count as a changed prop
+// and defeat that.
+const ICONS = {
+  up: <TrendingUp size={22} />,
+  down: <TrendingDown size={22} />,
+  egg: <span className="text-sm leading-none" aria-hidden="true">🥚</span>,
+  harvest: <Egg size={16} />,
+};
+
+// Shared attributes for number fields. inputMode picks the phone keyboard:
+// a plain number pad for whole numbers, a pad with a decimal point for
+// money. (pattern does the same job on older iOS.)
+const WHOLE_NUMBER_INPUT = { type: 'number', inputMode: 'numeric', pattern: '[0-9]*', min: '0', step: '1' };
+const MONEY_INPUT = { type: 'number', inputMode: 'decimal', min: '0', step: '0.01' };
+
+const expenseTotal = (e) => e.quantity * e.price;
+const formatEggs = (n) => `${formatCount(n)} eggs`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Most-recently-added first — not the sale/expense/harvest date, which is
+// user-entered and can be backdated, so it doesn't reflect entry order.
+const sortByRecentlyAdded = (rows) => [...rows].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
 // Blank fields default to 0 (a partial "3 trays, no loose pcs" entry is
 // normal), but a genuinely invalid number (negative, non-integer) returns
@@ -65,198 +82,182 @@ function trayPcsToTotal(trays, pcs) {
   return t * TRAY_SIZE + p;
 }
 
-function parseDateLocal(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function getTodayLocal() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function formatCurrency(amount) {
-  const val = amount || 0;
-  const sign = val < 0 ? '-' : '';
-  const abs = Math.abs(val);
-  return `${sign}${CURRENCY}${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatDateDisplay(dateStr) {
-  return parseDateLocal(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function getWeekKey(dateStr) {
-  const d = parseDateLocal(dateStr);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d.getFullYear(), d.getMonth(), diff);
-  const y = monday.getFullYear();
-  const m = String(monday.getMonth() + 1).padStart(2, '0');
-  const dd = String(monday.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function getPeriodKey(dateStr, granularity) {
-  if (granularity === 'daily') return dateStr;
-  if (granularity === 'weekly') return getWeekKey(dateStr);
-  if (granularity === 'monthly') return dateStr.slice(0, 7);
-  return dateStr.slice(0, 4);
-}
-
-function formatPeriodLabel(key, granularity) {
-  if (granularity === 'daily' || granularity === 'weekly') {
-    return parseDateLocal(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-  if (granularity === 'monthly') {
-    const [y, m] = key.split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-  }
-  return key;
-}
-
-function aggregateByPeriod(sales, expenses, granularity) {
-  const groups = {};
-  sales.forEach((s) => {
-    const key = getPeriodKey(s.date, granularity);
-    if (!groups[key]) groups[key] = { key, revenue: 0, quantity: 0, expenses: 0 };
-    groups[key].revenue += saleTotal(s);
-    groups[key].quantity += s.quantity;
-  });
-  expenses.forEach((e) => {
-    const key = getPeriodKey(e.date, granularity);
-    if (!groups[key]) groups[key] = { key, revenue: 0, quantity: 0, expenses: 0 };
-    groups[key].expenses += e.quantity * e.price;
-  });
-  const sorted = Object.values(groups).sort((a, b) => a.key.localeCompare(b.key));
-  const limited = sorted.slice(-PERIOD_LIMITS[granularity]);
-  return limited.map((g) => ({ ...g, label: formatPeriodLabel(g.key, granularity), profit: g.revenue - g.expenses }));
-}
-
-// ISO 8601 weeks start Monday and week 1 is whichever week contains
-// Jan 4th. Needed to translate the browser's native <input type="week">
-// value ("2026-W07") into the same Monday-keyed grouping getWeekKey
-// already uses everywhere else in this file, so period filtering lines
-// up with how the trend chart buckets weeks.
-function isoWeekValueToMonday(weekValue) {
-  const [yearStr, weekStr] = weekValue.split('-W');
-  const year = Number(yearStr);
-  const week = Number(weekStr);
-  const jan4 = new Date(year, 0, 4);
-  const jan4Day = jan4.getDay() || 7;
-  const week1Monday = new Date(year, 0, 4 - jan4Day + 1);
-  const monday = new Date(week1Monday.getFullYear(), week1Monday.getMonth(), week1Monday.getDate() + (week - 1) * 7);
-  const y = monday.getFullYear();
-  const m = String(monday.getMonth() + 1).padStart(2, '0');
-  const d = String(monday.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function getCurrentISOWeekValue() {
-  const today = new Date();
-  const day = today.getDay() || 7;
-  const thursday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 4 - day);
-  const yearStart = new Date(thursday.getFullYear(), 0, 1);
-  const weekNo = Math.ceil(((thursday - yearStart) / 86400000 + 1) / 7);
-  return `${thursday.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-}
-
-// Default picker value for each mode, so switching granularity always
-// lands on "now" (today / this week / this month / this year) instead of
-// an empty picker.
-function getPeriodDefaultValue(granularity) {
-  if (granularity === 'daily') return getTodayLocal();
-  if (granularity === 'weekly') return getCurrentISOWeekValue();
-  if (granularity === 'monthly') return getTodayLocal().slice(0, 7);
-  return getTodayLocal().slice(0, 4);
-}
-
-function isInSelectedPeriod(dateStr, granularity, periodValue) {
-  if (!periodValue) return false;
-  if (granularity === 'daily') return dateStr === periodValue;
-  if (granularity === 'weekly') return getWeekKey(dateStr) === isoWeekValueToMonday(periodValue);
-  if (granularity === 'monthly') return dateStr.slice(0, 7) === periodValue;
-  return dateStr.slice(0, 4) === periodValue;
-}
-
-function formatSelectedPeriodLabel(granularity, periodValue) {
-  if (!periodValue) return '';
-  if (granularity === 'daily') return formatDateDisplay(periodValue);
-  if (granularity === 'weekly') return `Week of ${formatDateDisplay(isoWeekValueToMonday(periodValue))}`;
-  if (granularity === 'monthly') {
-    const [y, m] = periodValue.split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-  }
-  return periodValue;
-}
-
-function aggregateBy(items, keyFn, valueFn) {
-  const groups = {};
-  items.forEach((item) => {
-    const key = keyFn(item);
-    groups[key] = (groups[key] || 0) + valueFn(item);
-  });
-  return Object.entries(groups).map(([name, value]) => ({ name, value }));
-}
-
-// Staggers a list's entrance animation, capped so that in a 47-row ledger the
-// last rows aren't still visibly waiting to appear.
+// Staggers a list's entrance animation, capped so the last rows of a batch
+// aren't still visibly waiting to appear.
 function rowDelay(index) {
   return Math.min(index, 8) * 35;
 }
 
+// ── Form building blocks ──────────────────────────────────────────────────
+
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{label}</span>
+      <span className="eggy-label">{label}</span>
       {children}
     </label>
   );
 }
 
+// An input with a small caption underneath; the caption doubles as the
+// input's accessible name.
+function CaptionedInput({ caption, children }) {
+  return (
+    <label className="block min-w-0">
+      {children}
+      <span className="eggy-hint">{caption}</span>
+    </label>
+  );
+}
+
+// One tap per choice instead of open → scroll → pick in a native dropdown,
+// and the current choice stays visible. Real radio buttons underneath — see
+// .eggy-chip in index.css.
+//
+// With `shortLabels`, phones get an even four-column grid using the short
+// names (two rows for the seven egg sizes — three ragged rows of full names
+// pushed the Add Sale button off the first screen), and wider screens show
+// the full names. Each radio's accessible name is always the full name.
+function ChipGroup({ label, options, value, onChange, shortLabels }) {
+  const name = useId();
+  return (
+    <fieldset>
+      <legend className="eggy-label">{label}</legend>
+      <div className={shortLabels ? 'grid grid-cols-4 gap-2 sm:flex sm:flex-wrap' : 'flex flex-wrap gap-2'}>
+        {options.map((option) => {
+          const short = shortLabels?.[option];
+          return (
+            <label
+              key={option}
+              className={`eggy-chip relative ${shortLabels ? 'justify-center px-2 sm:px-3.5' : ''} ${value === option ? 'is-active' : ''}`}
+            >
+              <input
+                type="radio"
+                name={name}
+                value={option}
+                checked={value === option}
+                onChange={() => onChange(option)}
+                aria-label={option}
+                className="sr-only"
+              />
+              {short ? (
+                <>
+                  <span className="sm:hidden" aria-hidden="true">{short}</span>
+                  <span className="hidden sm:inline" aria-hidden="true">{option}</span>
+                </>
+              ) : (
+                <span aria-hidden="true">{option}</span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 // Lets a count be entered as whole trays + loose pcs instead of one number
 // the user has to multiply out by hand first (e.g. "3 trays and 10 pcs"
-// instead of pre-computing 3*30+10=100).
-function TrayPcsField({ label, trays, pcs, onTraysChange, onPcsChange, unitLabel = 'eggs' }) {
+// instead of pre-computing 3*30+10=100). The running total sits beside the
+// label, so it's visible while typing.
+function TrayPcsField({ label, trays, pcs, onTraysChange, onPcsChange }) {
+  const labelId = useId();
   const total = trayPcsToTotal(trays, pcs);
   const hasValue = trays !== '' || pcs !== '';
   return (
-    <Field label={label}>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <input
-            type="number" min="0" step="1"
-            value={trays}
-            onChange={(e) => onTraysChange(e.target.value)}
-            placeholder="0"
-            className={inputClasses}
-            style={inputStyle}
-          />
-          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Trays (× {TRAY_SIZE})</span>
-        </div>
-        <div>
-          <input
-            type="number" min="0" step="1"
-            value={pcs}
-            onChange={(e) => onPcsChange(e.target.value)}
-            placeholder="0"
-            className={inputClasses}
-            style={inputStyle}
-          />
-          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Pcs</span>
-        </div>
+    <div role="group" aria-labelledby={labelId}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span id={labelId} className="eggy-label">{label}</span>
+        {hasValue && (
+          <span className={`text-xs font-medium tabular-nums ${total === null ? 'text-brick' : 'text-ink-soft'}`}>
+            {total === null ? 'Whole numbers, 0 or more' : `= ${formatEggs(total)}`}
+          </span>
+        )}
       </div>
-      {hasValue && (
-        <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-          {total === null ? 'Enter whole numbers, 0 or more.' : `= ${total.toLocaleString()} ${unitLabel}`}
-        </p>
-      )}
-    </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <CaptionedInput caption={`Trays (× ${TRAY_SIZE})`}>
+          <input {...WHOLE_NUMBER_INPUT} value={trays} onChange={(e) => onTraysChange(e.target.value)} placeholder="0" className={`${inputClasses} tabular-nums`} />
+        </CaptionedInput>
+        <CaptionedInput caption="Pcs">
+          <input {...WHOLE_NUMBER_INPUT} value={pcs} onChange={(e) => onPcsChange(e.target.value)} placeholder="0" className={`${inputClasses} tabular-nums`} />
+        </CaptionedInput>
+      </div>
+    </div>
   );
 }
+
+function MoneyInput({ value, onChange, caption }) {
+  return (
+    <CaptionedInput caption={caption}>
+      <span className="relative block">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted" aria-hidden="true">{CURRENCY}</span>
+        <input
+          {...MONEY_INPUT}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="0.00"
+          className={`${inputClasses} eggy-price-input pl-7 pr-2 tabular-nums`}
+        />
+      </span>
+    </CaptionedInput>
+  );
+}
+
+// Sales include a price per 30-egg tray between the unit and total prices.
+function PriceField({ quantity, perUnit, perTray, total, onPerUnitChange, onPerTrayChange, onTotalChange, perUnitCaption, totalCaption }) {
+  const labelId = useId();
+  const hasTray = !!onPerTrayChange;
+  return (
+    <div role="group" aria-labelledby={labelId}>
+      <span id={labelId} className="eggy-label">Price</span>
+      <div className={`grid gap-2 ${hasTray ? 'grid-cols-2 min-[360px]:grid-cols-3' : 'grid-cols-2'}`}>
+        <MoneyInput value={perUnit} onChange={onPerUnitChange} caption={perUnitCaption} />
+        {hasTray && <MoneyInput value={perTray} onChange={onPerTrayChange} caption={`Per tray (${TRAY_SIZE} eggs)`} />}
+        <div className={hasTray ? 'col-span-2 min-[360px]:col-span-1' : undefined}>
+          <MoneyInput value={total} onChange={onTotalChange} caption={totalCaption} />
+        </div>
+      </div>
+      {quantity <= 0 && (
+        <p className="eggy-hint">{hasTray ? 'Enter a quantity above to calculate the sale total.' : 'Enter a quantity above to auto-fill the other price.'}</p>
+      )}
+    </div>
+  );
+}
+
+function FormTitle({ icon: Icon, color, children }) {
+  return (
+    <h2 className="font-display font-semibold text-lg text-ink mb-4 flex items-center gap-2">
+      <Icon size={18} style={{ color }} aria-hidden="true" />
+      {children}
+    </h2>
+  );
+}
+
+function EditActions({ saving, onCancel }) {
+  return (
+    <div className="flex gap-2">
+      <button type="submit" disabled={saving} className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm">
+        {saving ? 'Saving…' : 'Save Changes'}
+      </button>
+      <button type="button" onClick={onCancel} disabled={saving} className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm">
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+// Clears the "recorded" confirmation a couple of seconds after it appears.
+function useSuccessFlag() {
+  const [success, setSuccess] = useState(false);
+  useEffect(() => {
+    if (!success) return;
+    const t = setTimeout(() => setSuccess(false), 2000);
+    return () => clearTimeout(t);
+  }, [success]);
+  return [success, setSuccess];
+}
+
+// ── Shared pieces ─────────────────────────────────────────────────────────
 
 function StampBadge({ icon, color, size = 44 }) {
   return (
@@ -266,23 +267,24 @@ function StampBadge({ icon, color, size = 44 }) {
         width: size,
         height: size,
         border: `2px solid ${color}`,
-        // Tinted fill inside the ring plus a soft halo — the old badge was a
-        // bare outline sitting on the card, which read as unfinished.
+        // Tinted fill inside the ring plus a soft halo, tilted like an ink
+        // stamp with the icon counter-rotated upright.
         backgroundColor: `${color}14`,
         boxShadow: `0 0 0 4px ${color}12`,
         color,
         transform: 'rotate(-6deg)',
       }}
+      aria-hidden="true"
     >
       <span style={{ transform: 'rotate(6deg)', display: 'flex' }}>{icon}</span>
     </div>
   );
 }
 
-function Header({ username, onLogout }) {
+const Header = memo(function Header({ username, onLogout }) {
   return (
     <header
-      className="px-4 py-4 sticky top-0 z-20"
+      className="sticky top-0 z-20 h-16 px-4 flex items-center"
       style={{
         // Gradient + a gold hairline along the bottom edge, so the header
         // reads as a lit surface rather than a flat brown block.
@@ -291,41 +293,22 @@ function Header({ username, onLogout }) {
         boxShadow: ELEVATION.lg,
       }}
     >
-      <div className="max-w-4xl mx-auto flex items-center gap-3">
-        <div
-          className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
-          style={{
-            border: `2px solid ${COLORS.yolk}`,
-            backgroundColor: 'rgba(229,166,46,0.12)',
-            boxShadow: `0 0 0 4px ${COLORS.yolk}1A`,
-            transform: 'rotate(-6deg)',
-          }}
-        >
-          <span style={{ transform: 'rotate(6deg)' }} className="text-lg">🥚</span>
-        </div>
+      <div className="max-w-4xl mx-auto w-full flex items-center gap-3">
+        <BrandMark size={40} onDark />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-white" style={{ fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em' }}>
-            Egg Farm Ledger
-          </h1>
-          <p className="text-[11px] tracking-wide" style={{ color: COLORS.gold, fontFamily: FONT_BODY }}>
-            Sales &amp; expense tracker
-          </p>
+          <h1 className="font-display text-[17px] font-bold leading-tight tracking-tight text-white">Egg Farm Ledger</h1>
+          {/* Today's date where a fixed tagline used to be — useful context
+              right before recording something. */}
+          <p className="text-[11px] tracking-wide text-gold truncate">{formatWeekday(new Date())}</p>
         </div>
         {onLogout && (
           <div className="flex items-center gap-2 shrink-0">
-            {username && (
-              <span className="text-xs hidden sm:inline" style={{ color: COLORS.gold, fontFamily: FONT_BODY }}>{username}</span>
-            )}
+            {username && <span className="text-xs hidden sm:inline text-gold">{username}</span>}
             <button
               type="button"
               onClick={onLogout}
-              className="eggy-press eggy-focus flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl"
-              style={{
-                color: '#FFF',
-                backgroundColor: 'rgba(255,255,255,0.07)',
-                border: `1px solid ${COLORS.yolk}55`,
-                fontFamily: FONT_BODY,
-              }}
+              className="eggy-press eggy-focus flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl text-white"
+              style={{ backgroundColor: 'rgba(255,255,255,0.07)', border: `1px solid ${COLORS.yolk}55` }}
             >
               <LogOut size={14} />
               Log out
@@ -335,78 +318,63 @@ function Header({ username, onLogout }) {
       </div>
     </header>
   );
-}
+});
 
 function ErrorBanner({ message, onClose, onRetry }) {
   return (
-    <div
-      role="alert"
-      className="text-sm rounded-lg px-3 py-2 mb-4 flex items-center justify-between"
-      style={{ backgroundColor: '#F7E6E1', border: `1px solid ${COLORS.brick}55`, color: COLORS.brick, fontFamily: FONT_BODY }}
-    >
+    <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-xl pl-3 pr-1 py-1.5 text-sm text-brick bg-[#F7E6E1] border border-[#9B443355]">
       <span>{message}</span>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1">
         {onRetry && <button type="button" onClick={onRetry} className="eggy-btn eggy-btn-quiet eggy-focus px-3 py-1 text-xs">Retry</button>}
-        <button type="button" onClick={onClose} aria-label="Dismiss error" className="font-bold px-2">×</button>
+        <button type="button" onClick={onClose} aria-label="Dismiss error" className="eggy-icon-btn eggy-focus">
+          <X size={16} />
+        </button>
       </div>
     </div>
   );
 }
 
-// Shown during a background refresh (see the visibilitychange effect in
-// EggFarmDashboard) so a slow one — e.g. Vercel's function and Neon's
-// compute both waking up after the PWA sat idle — doesn't look like the
-// app is just frozen. 'syncing' only appears after a short delay and
-// 'slow' only after a few seconds, so a normal, already-warm refresh
-// never flashes anything on screen.
+// Shown during a background refresh (see the visibilitychange handling in
+// useLedger) so a slow one — e.g. Vercel's function and Neon's compute both
+// waking up after the PWA sat idle — doesn't look like the app is frozen.
+// 'syncing' only appears after a short delay and 'slow' only after a few
+// seconds, so a normal, already-warm refresh never flashes anything.
 function SyncBanner({ status }) {
   if (status === 'idle') return null;
-  const message = status === 'slow'
-    ? 'Still syncing — the server may be waking up, this can take a few seconds…'
-    : 'Syncing…';
   return (
-    <div
-      className="text-sm rounded-lg px-3 py-2 mb-4 flex items-center gap-2"
-      style={{ backgroundColor: '#EEF1E4', border: `1px solid ${COLORS.moss}55`, color: COLORS.moss, fontFamily: FONT_BODY }}
-    >
-      <Loader2 size={14} className="animate-spin" />
-      <span>{message}</span>
+    <div className="mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-moss bg-[#EEF1E4] border border-[#4D7A3E55]">
+      <Loader2 size={14} className="animate-spin shrink-0" />
+      <span>{status === 'slow' ? 'Still syncing — the server may be waking up, this can take a few seconds…' : 'Syncing…'}</span>
     </div>
   );
 }
 
-// `delay` staggers the entrance so the grid assembles rather than snapping
-// in all at once — the single cheapest thing that makes a screen feel built
-// rather than dumped.
-function StatCard({ icon, label, value, color, sub, delay = 0, format, suffix }) {
+function CardHeader({ title, children }) {
   return (
-    <div className="eggy-card eggy-rise p-4" style={{ animationDelay: `${delay}ms` }}>
-      <StampBadge icon={icon} color={color} size={38} />
-      <p
-        className="text-[11px] mt-3 font-medium uppercase"
-        style={{ color: COLORS.muted, fontFamily: FONT_BODY, letterSpacing: '0.07em' }}
-      >
-        {label}
-      </p>
-      <p
-        className="text-xl font-bold mt-1"
-        style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em', ...NUM_TABULAR }}
-      >
-        <AnimatedNumber value={value} format={format} suffix={suffix} />
-      </p>
-      {sub && <p className="text-xs mt-0.5" style={{ color: COLORS.muted, fontFamily: FONT_BODY, ...NUM_TABULAR }}>{sub}</p>}
+    <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+      <h2 className="font-display font-semibold text-ink">{title}</h2>
+      {children}
     </div>
   );
 }
 
-// Net profit is the one number the whole ledger exists to answer, but in a
-// uniform 2×3 grid it carried exactly the same visual weight as "Avg
-// Rejects". This gives it its own surface, a tinted wash in the sign's
-// colour, and a figure big enough to read from arm's length.
-function HeroStatCard({ icon, label, value, color, caption, positive }) {
+function EmptyNote({ children }) {
+  return <p className="text-sm py-8 text-center text-muted">{children}</p>;
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────
+
+// Net profit is the one number the whole ledger exists to answer, so it gets
+// its own surface, a wash in the sign's colour, and a figure readable at
+// arm's length. Revenue and expenses sit underneath as its two halves — they
+// used to repeat as separate cards further down.
+const HeroCard = memo(function HeroCard({ netProfit, totalRevenue, totalExpenses }) {
+  const positive = netProfit >= 0;
+  const color = positive ? COLORS.moss : COLORS.brick;
   return (
-    <div
-      className="eggy-card eggy-rise p-5 relative overflow-hidden"
+    <section
+      aria-label="Net profit"
+      className="eggy-card eggy-rise relative overflow-hidden"
       style={{
         // A very low-opacity wash of the profit/loss colour bleeding in from
         // the top-right, so "up" and "down" are legible before you read a
@@ -416,320 +384,419 @@ function HeroStatCard({ icon, label, value, color, caption, positive }) {
       }}
     >
       {/* Accent rule along the top edge, in the same colour as the figure. */}
-      <div
-        className="absolute inset-x-0 top-0 h-[3px]"
-        style={{ backgroundImage: `linear-gradient(90deg, ${color}, ${color}22)` }}
-      />
-      <div className="flex items-center gap-4">
-        <StampBadge icon={icon} color={color} size={54} />
-        <div className="min-w-0">
-          <p
-            className="text-[11px] font-medium uppercase"
-            style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, letterSpacing: '0.09em' }}
+      <div className="absolute inset-x-0 top-0 h-[3px]" style={{ backgroundImage: `linear-gradient(90deg, ${color}, ${color}22)` }} />
+      <div className="p-5 pb-4">
+        <div className="flex items-center gap-3">
+          <StampBadge icon={positive ? ICONS.up : ICONS.down} color={color} size={44} />
+          <div className="flex-1 min-w-0">
+            <p className="eggy-overline">Net profit</p>
+            <p className="text-xs text-muted">All time</p>
+          </div>
+          <span
+            className="text-[10px] font-bold px-2 py-1 rounded-full uppercase shrink-0"
+            style={{ backgroundColor: `${color}1F`, color, letterSpacing: '0.06em' }}
           >
-            {label}
-          </p>
-          <p
-            className="text-[2.1rem] font-bold mt-1 leading-none"
-            style={{ color, fontFamily: FONT_DISPLAY, letterSpacing: '-0.02em' }}
-          >
-            <AnimatedNumber value={value} format={formatCurrency} />
-          </p>
-          {caption && (
-            <p className="text-xs mt-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, ...NUM_TABULAR }}>
-              {caption}
-            </p>
-          )}
+            {positive ? 'In profit' : 'At a loss'}
+          </span>
         </div>
+        <p className="mt-3 text-[2.25rem] leading-none font-semibold tracking-tight" style={{ color }}>
+          <AnimatedNumber value={netProfit} format={formatCurrency} />
+        </p>
       </div>
-      {positive !== undefined && (
-        <span
-          className="absolute top-4 right-4 text-[10px] font-bold px-2 py-1 rounded-full uppercase"
-          style={{ backgroundColor: `${color}1F`, color, fontFamily: FONT_BODY, letterSpacing: '0.06em' }}
-        >
-          {positive ? 'In profit' : 'At a loss'}
-        </span>
-      )}
-    </div>
+      <div className="grid grid-cols-2 border-t border-hairline">
+        <HeroFigure label="Revenue" value={totalRevenue} dot={COLORS.moss} />
+        <HeroFigure label="Expenses" value={totalExpenses} dot={COLORS.brick} className="border-l border-hairline" />
+      </div>
+    </section>
   );
-}
+});
 
-function GranularityToggle({ value, onChange }) {
-  const options = [
-    { id: 'daily', label: 'Day' },
-    { id: 'weekly', label: 'Week' },
-    { id: 'monthly', label: 'Month' },
-    { id: 'yearly', label: 'Year' },
-  ];
-  return <SegmentedControl options={options} value={value} onChange={onChange} label="Time period" />;
-}
-
-// The amber size ramp runs from light to dark, so no single label colour
-// stays readable across every slice. This picks ink or white by the slice's
-// own relative luminance (the WCAG formula) instead of guessing.
-function labelInkFor(hex) {
-  const channel = (i) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
-  const linear = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const luminance = 0.2126 * linear(channel(0)) + 0.7152 * linear(channel(1)) + 0.0722 * linear(channel(2));
-  return luminance > 0.42 ? COLORS.ink : '#FFFFFF';
-}
-
-function PieCard({ title, data, colors, empty, emptyText, valueFormatter }) {
-  const reducedMotion = useReducedMotion();
-  // Percentages sit inside their slice rather than outside on leader lines,
-  // which is what used to collide with the legend below (the "15%" landed
-  // on top of the word "Large"). Slices under 6% are skipped — a label
-  // can't fit inside one — and stay readable via the legend and tooltip.
-  const renderSliceLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
-    if (percent < 0.06) return null;
-    const RADIAN = Math.PI / 180;
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.62;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-    const fill = colors[data[index]?.name] || COLORS.muted;
-    return (
-      <text
-        x={x}
-        y={y}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fill={labelInkFor(fill)}
-        style={{ fontSize: 11, fontWeight: 600, fontFamily: FONT_BODY }}
-      >
-        {`${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
-  };
-
+// Identity comes from the coloured dot beside the label; the figure itself
+// stays in ink so it reads cleanly.
+function HeroFigure({ label, value, dot, className = '' }) {
   return (
-    <div className="eggy-card p-5">
-      <h2 className="font-semibold mb-3 text-sm" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>{title}</h2>
-      {empty || data.length === 0 ? (
-        <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{emptyText}</p>
-      ) : (
-        <ResponsiveContainer width="100%" height={230}>
-          <PieChart>
-            <Pie
-              isAnimationActive={!reducedMotion}
-              animationBegin={0}
-              animationDuration={650}
-              animationEasing="ease-out"
-              data={data}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="45%"
-              outerRadius={72}
-              labelLine={false}
-              label={renderSliceLabel}
-              // Card-coloured stroke reads as a gap between slices rather
-              // than an outline drawn around each one.
-              stroke={COLORS.card}
-              strokeWidth={2}
-            >
-              {data.map((entry, i) => (
-                <Cell key={i} fill={colors[entry.name] || COLORS.muted} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value, name) => [valueFormatter(value), name]} contentStyle={{ borderRadius: 8, fontSize: 12, fontFamily: FONT_BODY }} />
-            <Legend wrapperStyle={{ fontSize: 11, fontFamily: FONT_BODY, paddingTop: 4 }} />
-          </PieChart>
-        </ResponsiveContainer>
-      )}
+    <div className={`px-5 py-3 min-w-0 ${className}`}>
+      <p className="flex items-center gap-1.5 text-xs text-ink-soft">
+        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: dot }} aria-hidden="true" />
+        {label}
+      </p>
+      <p className="mt-0.5 text-base font-semibold text-ink truncate">
+        <AnimatedNumber value={value} format={formatCurrency} />
+      </p>
     </div>
   );
 }
+
+// `delay` staggers the entrance so the grid assembles rather than snapping
+// in all at once.
+const StatCard = memo(function StatCard({ icon, label, value, color, format, suffix, sub, delay = 0 }) {
+  return (
+    <div className="eggy-card eggy-rise p-4 min-w-0" style={{ animationDelay: `${delay}ms` }}>
+      <div className="flex items-center gap-2.5">
+        <StampBadge icon={icon} color={color} size={32} />
+        <p className="eggy-overline truncate">{label}</p>
+      </div>
+      <p className="mt-3 text-xl font-semibold tracking-tight text-ink">
+        <AnimatedNumber value={value} format={format} suffix={suffix} />
+      </p>
+      {sub && <p className="text-xs mt-0.5 text-muted tabular-nums truncate">{sub}</p>}
+    </div>
+  );
+});
+
+// Swatch legend in ink text (the old one coloured the words themselves,
+// which made "Revenue" in light green hard to read). Rectangles, matching
+// the bars they stand for.
+function ChartLegend() {
+  return (
+    <div className="flex items-center gap-4 text-xs text-ink-soft mb-2" aria-hidden="true">
+      {[['Revenue', CHART.revenue], ['Expenses', CHART.expenses]].map(([label, color]) => (
+        <span key={label} className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-[3px]" style={{ backgroundColor: color }} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The chart's numbers as a table for screen readers — a bar chart alone
+// says nothing to someone who can't see it.
+function ChartTable({ data }) {
+  return (
+    <table className="sr-only">
+      <caption>Revenue and expenses by period</caption>
+      <thead>
+        <tr><th scope="col">Period</th><th scope="col">Revenue</th><th scope="col">Expenses</th></tr>
+      </thead>
+      <tbody>
+        {data.map((d) => (
+          <tr key={d.key}><th scope="row">{d.label}</th><td>{formatCurrency(d.revenue)}</td><td>{formatCurrency(d.expenses)}</td></tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// Renders the chart from its separately loaded chunk (see lib/charts.js).
+// If the chunk already arrived — the usual case, since App starts the
+// download at launch — it renders straight away. Otherwise a placeholder of
+// the exact same height holds the space, and a failed download (offline,
+// or mid-deploy) offers a retry instead of breaking the whole dashboard.
+function LazyTrendChart({ data }) {
+  const [Chart, setChart] = useState(getLoadedTrendChart);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (Chart) return;
+    let active = true;
+    loadTrendChart().then(
+      (component) => { if (active) setChart(() => component); },
+      () => { if (active) setFailed(true); },
+    );
+    return () => { active = false; };
+  }, [Chart, attempt]);
+
+  if (failed) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 text-center" style={{ height: CHART.height }}>
+        <p className="text-sm text-muted">The chart couldn't load. Check your connection.</p>
+        <button
+          type="button"
+          onClick={() => { setFailed(false); setAttempt((n) => n + 1); }}
+          className="eggy-btn eggy-btn-quiet eggy-focus px-3 py-1.5 text-xs"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!Chart) return <div className="eggy-skeleton w-full" style={{ height: CHART.height }} />;
+  return <Chart data={data} />;
+}
+
+function MiniFigure({ label, value }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-ink-soft truncate">{label}</p>
+      <p className="text-[15px] font-semibold text-ink tabular-nums mt-0.5 truncate">{value}</p>
+    </div>
+  );
+}
+
+// Memoized with its own aggregation, so switching Day/Week/Month/Year
+// redraws only this card — not the hero, the period summary and both
+// breakdowns along with it.
+const TrendCard = memo(function TrendCard({ paidSales, expenses, granularity, onGranularityChange, avgPricePerEgg }) {
+  const chartData = useMemo(() => aggregateByPeriod(paidSales, expenses, granularity), [paidSales, expenses, granularity]);
+  const avgRevenue = chartData.length ? chartData.reduce((sum, d) => sum + d.revenue, 0) / chartData.length : 0;
+  return (
+    <section className="eggy-card p-5">
+      <CardHeader title="Revenue vs Expenses">
+        <SegmentedControl options={GRANULARITIES} value={granularity} onChange={onGranularityChange} label="Time period" />
+      </CardHeader>
+      {chartData.length === 0 ? (
+        <EmptyNote>No data for this view yet.</EmptyNote>
+      ) : (
+        <>
+          <ChartLegend />
+          <LazyTrendChart data={chartData} />
+          <ChartTable data={chartData} />
+        </>
+      )}
+      <div className="mt-4 pt-3 border-t border-hairline grid grid-cols-2 gap-3">
+        <MiniFigure label={`Avg revenue / ${PERIOD_NOUN[granularity]}`} value={formatCurrency(avgRevenue)} />
+        <MiniFigure label="Avg price / egg" value={formatCurrency(avgPricePerEgg)} />
+      </div>
+    </section>
+  );
+});
 
 // Native picker matching the selected granularity. Note: <input type="week">
 // only renders as a real week-picker in Chromium browsers — Firefox and
-// Safari fall back to a plain text field there, a known HTML limitation,
-// not something fixable from this end without building a custom widget.
+// Safari fall back to a plain text field there, a known HTML limitation.
+// The arrows beside it work everywhere.
 function PeriodPicker({ granularity, value, onChange, availableYears }) {
-  const style = { ...inputStyle, maxWidth: 200 };
-  if (granularity === 'daily') {
-    return <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style} />;
+  const handleChange = (e) => onChange(e.target.value);
+  const label = `Selected ${PERIOD_NOUN[granularity]}`;
+  if (granularity === 'yearly') {
+    return (
+      <select value={value} onChange={handleChange} className={inputClasses} aria-label={label}>
+        {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
+      </select>
+    );
   }
-  if (granularity === 'weekly') {
-    return <input type="week" value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style} />;
-  }
-  if (granularity === 'monthly') {
-    return <input type="month" value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style} />;
-  }
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClasses} style={style}>
-      {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
-    </select>
-  );
+  const type = { daily: 'date', weekly: 'week', monthly: 'month' }[granularity];
+  // Keyed by type so switching granularity mounts a fresh input rather than
+  // re-typing one that still holds a value in the old format.
+  return <input key={type} type={type} value={value} onChange={handleChange} className={inputClasses} aria-label={label} />;
 }
 
-// A single selected period reduces to three headline numbers (sales,
-// expenses, profit) — a bar chart would just draw one lonely bar per
-// category, so this is a small KPI row instead, the same "stamp + label +
-// value" language as the StatCards at the top of the dashboard.
-function MiniStatTile({ icon, label, value, color }) {
+function SummaryRow({ label, detail, value, color, total = false }) {
   return (
-    <div className="rounded-xl p-3" style={{ backgroundColor: COLORS.paper, border: `1px solid ${COLORS.cardBorder}` }}>
-      <StampBadge icon={icon} color={color} size={32} />
-      <p className="text-xs mt-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{label}</p>
-      <p className="text-base font-bold mt-0.5 truncate" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}><AnimatedNumber value={value} format={formatCurrency} /></p>
+    <div className={`flex items-baseline justify-between gap-3 py-2.5 ${total ? 'border-t border-hairline' : ''}`}>
+      <dt className={total ? 'text-sm font-semibold text-ink' : 'text-sm text-ink-soft'}>
+        {label}
+        {detail && <span className="block text-[11px] text-muted">{detail}</span>}
+      </dt>
+      <dd className={`tabular-nums text-ink ${total ? 'text-base font-semibold' : 'text-sm font-medium'}`} style={color ? { color } : undefined}>
+        <AnimatedNumber value={value} format={formatCurrency} />
+      </dd>
     </div>
   );
 }
 
-function PeriodAverageCard({
-  avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange,
-  availableYears, avgPeriodLabel, periodSalesTotal, periodExpensesTotal,
-  periodProfit, avgPeriodCounts,
+// Totals for one chosen day/week/month/year: paid sales minus expenses, the
+// same way net profit is worked out, scoped to that period. Laid out like a
+// ledger statement — figures right-aligned in a column, a rule above the
+// result — so long amounts never get squeezed into narrow tiles.
+const PeriodSummaryCard = memo(function PeriodSummaryCard({
+  paidSales, expenses, granularity, value, onGranularityChange, onValueChange, availableYears,
 }) {
-  const hasData = avgPeriodCounts.expenses > 0 || avgPeriodCounts.sales > 0;
+  const totals = useMemo(() => {
+    const inPeriod = (record) => isInSelectedPeriod(record.date, granularity, value);
+    const periodSales = paidSales.filter(inPeriod);
+    const periodExpenses = expenses.filter(inPeriod);
+    return {
+      sales: periodSales.reduce((sum, s) => sum + saleTotal(s), 0),
+      expenses: periodExpenses.reduce((sum, e) => sum + expenseTotal(e), 0),
+      salesCount: periodSales.length,
+      expensesCount: periodExpenses.length,
+    };
+  }, [paidSales, expenses, granularity, value]);
+  const profit = totals.sales - totals.expenses;
+  const hasData = totals.salesCount > 0 || totals.expensesCount > 0;
+  const noun = PERIOD_NOUN[granularity];
+
+  // One tap to the previous or next period, instead of reopening the native
+  // picker each time. Years are limited to the ones the year picker lists,
+  // and there's nothing to step to after the current period.
+  const prev = value ? stepPeriod(granularity, value, -1) : null;
+  const next = value ? stepPeriod(granularity, value, 1) : null;
+  const yearly = granularity === 'yearly';
+  const canPrev = prev !== null && (!yearly || availableYears.includes(prev));
+  const canNext = next !== null && next <= getPeriodDefaultValue(granularity) && (!yearly || availableYears.includes(next));
 
   return (
-    <div className="eggy-card p-5">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h2 className="font-semibold" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>Period Averages</h2>
-        <GranularityToggle value={avgGranularity} onChange={onAvgGranularityChange} />
-      </div>
-      <div className="mb-3">
-        <PeriodPicker granularity={avgGranularity} value={avgPeriodValue} onChange={onAvgPeriodValueChange} availableYears={availableYears} />
+    <section className="eggy-card p-5">
+      <CardHeader title="Period Summary">
+        <SegmentedControl options={GRANULARITIES} value={granularity} onChange={onGranularityChange} label="Period length" />
+      </CardHeader>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onValueChange(prev)}
+          disabled={!canPrev}
+          aria-label={`Previous ${noun}`}
+          className="eggy-icon-btn eggy-focus shrink-0 border border-hairline bg-card-alt"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <PeriodPicker granularity={granularity} value={value} onChange={onValueChange} availableYears={availableYears} />
+        </div>
+        <button
+          type="button"
+          onClick={() => onValueChange(next)}
+          disabled={!canNext}
+          aria-label={`Next ${noun}`}
+          className="eggy-icon-btn eggy-focus shrink-0 border border-hairline bg-card-alt"
+        >
+          <ChevronRight size={18} />
+        </button>
       </div>
       {!hasData ? (
-        <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>No entries for this period.</p>
+        <EmptyNote>No entries for this {noun}.</EmptyNote>
       ) : (
         <>
-          <p className="text-xs mb-2" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>{avgPeriodLabel}</p>
-          <div className="grid grid-cols-3 gap-2">
-            <MiniStatTile icon={<DollarSign size={16} />} label="Sales" value={periodSalesTotal} color={COLORS.moss} />
-            <MiniStatTile icon={<Receipt size={16} />} label="Expenses" value={periodExpensesTotal} color={COLORS.brick} />
-            <MiniStatTile
-              icon={periodProfit >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-              label="Profit"
-              value={periodProfit}
-              color={periodProfit >= 0 ? COLORS.moss : COLORS.brick}
-            />
-          </div>
-          <p className="text-xs mt-3" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>
-            Based on {avgPeriodCounts.sales} sale{avgPeriodCounts.sales === 1 ? '' : 's'}, {avgPeriodCounts.expenses} expense{avgPeriodCounts.expenses === 1 ? '' : 's'} logged for this period.
-          </p>
+          <p className="text-xs mt-4 mb-2 text-ink-soft">{formatSelectedPeriodLabel(granularity, value)}</p>
+          <dl className="eggy-inset px-4">
+            <SummaryRow label="Sales" detail={plural(totals.salesCount, 'paid sale')} value={totals.sales} />
+            <SummaryRow label="Expenses" detail={plural(totals.expensesCount, 'expense')} value={totals.expenses} />
+            <SummaryRow label="Profit" value={profit} color={profit >= 0 ? COLORS.moss : COLORS.brick} total />
+          </dl>
         </>
       )}
-    </div>
+    </section>
   );
-}
+});
+
+// A ranked bar list instead of a pie: bars on a shared baseline compare far
+// more precisely than slices (the old pie couldn't show 2% against 1%),
+// every value is printed so nothing hides behind a tooltip — which a phone
+// can't hover anyway — and it needs no charting library. One colour per
+// card: each bar is labelled, so colour isn't needed to tell them apart.
+const BreakdownCard = memo(function BreakdownCard({ title, items, color, formatValue, emptyText, total }) {
+  const reducedMotion = useReducedMotion();
+  return (
+    <section className="eggy-card p-5">
+      <div className="flex items-baseline justify-between gap-3 mb-4">
+        <h2 className="font-display font-semibold text-ink">{title}</h2>
+        {items.length > 0 && <span className="text-xs text-muted tabular-nums shrink-0">{formatValue(total)}</span>}
+      </div>
+      {items.length === 0 ? (
+        <EmptyNote>{emptyText}</EmptyNote>
+      ) : (
+        <ul className="space-y-3.5">
+          {items.map((item, i) => (
+            <li key={item.name}>
+              <div className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="font-medium text-ink truncate">{item.name}</span>
+                <span className="shrink-0 tabular-nums text-ink-soft">
+                  <span className="font-semibold text-ink">{formatValue(item.value)}</span>
+                  <span className="inline-block w-11 text-right">{formatShare(item.share)}</span>
+                </span>
+              </div>
+              {/* Track in a light step of the bar's own colour; the bar is
+                  square at the baseline with a rounded end, and grows in
+                  over the same 650ms the old pie took to sweep. */}
+              <div className="mt-1.5 h-2 rounded-r-[4px] overflow-hidden" style={{ backgroundColor: `${color}1F` }} aria-hidden="true">
+                <motion.div
+                  className="h-full rounded-r-[4px]"
+                  style={{ backgroundColor: color }}
+                  initial={reducedMotion ? false : { width: 0 }}
+                  animate={{ width: `${item.share * 100}%` }}
+                  transition={{ duration: reducedMotion ? 0 : 0.65, ease: 'easeOut', delay: reducedMotion ? 0 : i * 0.05 }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+});
 
 function EmptyState() {
   return (
     <div className="eggy-card p-10 text-center">
-      <span className="text-4xl">🥚</span>
-      <p className="font-medium mt-3" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>No entries yet</p>
-      <p className="text-sm mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Add your first sale or expense to see charts here.</p>
+      <span className="text-4xl" aria-hidden="true">🥚</span>
+      <p className="font-display font-semibold mt-3 text-ink">No entries yet</p>
+      <p className="text-sm mt-1 text-muted">Add your first sale or expense to see charts here.</p>
     </div>
   );
 }
 
 function DashboardView({
-  totalRevenue, totalExpenses, netProfit, totalEggs, avgPricePerEgg,
-  avgRevenuePerPeriod, granularity, setGranularity, chartData,
-  sizeBreakdown, expenseBreakdown, hasSales, hasExpenses,
-  avgHarvested, avgRejected,
-  avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange,
-  availableYears, avgPeriodLabel, periodSalesTotal, periodExpensesTotal,
-  periodProfit, avgPeriodCounts,
+  sales, paidSales, expenses, harvests, granularity, onGranularityChange,
+  avgGranularity, onAvgGranularityChange, avgPeriodValue, onAvgPeriodValueChange, availableYears,
 }) {
-  const granularityLabels = { daily: 'Day', weekly: 'Week', monthly: 'Month', yearly: 'Year' };
-  const reducedMotion = useReducedMotion();
+  const totals = useMemo(() => {
+    const revenue = paidSales.reduce((sum, s) => sum + saleTotal(s), 0);
+    const eggs = paidSales.reduce((sum, s) => sum + s.quantity, 0);
+    const spent = expenses.reduce((sum, e) => sum + expenseTotal(e), 0);
+    const harvested = harvests.reduce((sum, h) => sum + h.harvested, 0);
+    const rejected = harvests.reduce((sum, h) => sum + h.rejected, 0);
+    return {
+      revenue,
+      eggs,
+      spent,
+      avgPricePerEgg: eggs ? revenue / eggs : 0,
+      // Average per harvest record entered (in practice usually one per
+      // day) — the requested "average production and reject eggs".
+      avgHarvested: harvests.length ? Math.round(harvested / harvests.length) : 0,
+      avgRejected: harvests.length ? Math.round(rejected / harvests.length) : 0,
+    };
+  }, [paidSales, expenses, harvests]);
+  // Egg sizes keep their natural small → large order; expense categories
+  // have none, so they're ranked largest first.
+  const sizeBreakdown = useMemo(() => breakdown(paidSales, (s) => s.eggSize, (s) => s.quantity, EGG_SIZES), [paidSales]);
+  const expenseBreakdown = useMemo(() => breakdown(expenses, (e) => e.item, expenseTotal), [expenses]);
 
   return (
-    <div className="space-y-5">
-      <HeroStatCard
-        icon={netProfit >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
-        label="Net Profit"
-        value={netProfit}
-        color={netProfit >= 0 ? COLORS.moss : COLORS.brick}
-        caption={`${formatCurrency(totalRevenue)} in · ${formatCurrency(totalExpenses)} out`}
-        positive={netProfit >= 0}
-      />
+    <div className="space-y-4">
+      <HeroCard netProfit={totals.revenue - totals.spent} totalRevenue={totals.revenue} totalExpenses={totals.spent} />
       <div className="grid grid-cols-2 gap-3">
-        <StatCard delay={40} icon={<DollarSign size={18} />} label="Revenue" value={totalRevenue} format={formatCurrency} color={COLORS.moss} />
-        <StatCard delay={80} icon={<Receipt size={18} />} label="Expenses" value={totalExpenses} format={formatCurrency} color={COLORS.brick} />
-        <StatCard delay={120} icon={<span className="text-sm">🥚</span>} label="Eggs Sold" value={totalEggs} color={COLORS.yolk} />
-        {/* Harvested and rejected are one measurement pair, so they share a
-            card — as two separate tiles they left an orphan in the grid. */}
+        <StatCard delay={60} icon={ICONS.egg} label="Eggs sold" value={totals.eggs} format={formatCount} color={COLORS.yolk} sub={formatTrays(totals.eggs)} />
         <StatCard
-          delay={160}
-          icon={<Egg size={18} />}
-          label="Avg Harvest"
-          value={avgHarvested}
+          delay={120}
+          icon={ICONS.harvest}
+          label="Avg harvest"
+          value={totals.avgHarvested}
+          format={formatCount}
           suffix=" eggs"
           color={COLORS.moss}
-          sub={`${avgRejected.toLocaleString()} rejected`}
+          sub={`${formatCount(totals.avgRejected)} rejected`}
         />
       </div>
 
-      {!hasSales && !hasExpenses ? (
+      {sales.length === 0 && expenses.length === 0 ? (
         <EmptyState />
       ) : (
         <>
-          <div className="eggy-card p-5">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <h2 className="font-semibold" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>Revenue vs Expenses</h2>
-              <GranularityToggle value={granularity} onChange={setGranularity} />
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-              <span>Avg / {granularityLabels[granularity]}: <strong style={{ color: COLORS.ink }}>{formatCurrency(avgRevenuePerPeriod)}</strong></span>
-              <span>Avg price/egg: <strong style={{ color: COLORS.ink }}>{formatCurrency(avgPricePerEgg)}</strong></span>
-            </div>
-            {chartData.length === 0 ? (
-              <p className="text-sm py-8 text-center" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>No data for this view yet.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={chartData} margin={{ left: -20, right: 8 }} barGap={2}>
-                  {/* Solid hairline, horizontal only: dashes read as a
-                      threshold or projection when this is just a grid, and
-                      vertical rules add noise on a categorical axis. */}
-                  <CartesianGrid vertical={false} stroke={COLORS.cardBorder} />
-                  <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: COLORS.cardBorder }} tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
-                  <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: COLORS.inkSoft, fontFamily: FONT_BODY }} />
-                  <Tooltip
-                    formatter={(value, name) => [formatCurrency(value), name === 'revenue' ? 'Revenue' : 'Expenses']}
-                    contentStyle={{ borderRadius: 8, border: `1px solid ${COLORS.cardBorder}`, fontSize: 12, fontFamily: FONT_BODY }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12, fontFamily: FONT_BODY }} formatter={(v) => (v === 'revenue' ? 'Revenue' : 'Expenses')} />
-                  <Bar dataKey="revenue" fill={COLORS.moss} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={650} animationEasing="ease-out" />
-                  <Bar dataKey="expenses" fill={COLORS.brick} radius={[4, 4, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={650} animationBegin={60} animationEasing="ease-out" />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <PeriodAverageCard
-            avgGranularity={avgGranularity}
-            onAvgGranularityChange={onAvgGranularityChange}
-            avgPeriodValue={avgPeriodValue}
-            onAvgPeriodValueChange={onAvgPeriodValueChange}
-            availableYears={availableYears}
-            avgPeriodLabel={avgPeriodLabel}
-            periodSalesTotal={periodSalesTotal}
-            periodExpensesTotal={periodExpensesTotal}
-            periodProfit={periodProfit}
-            avgPeriodCounts={avgPeriodCounts}
+          <TrendCard
+            paidSales={paidSales}
+            expenses={expenses}
+            granularity={granularity}
+            onGranularityChange={onGranularityChange}
+            avgPricePerEgg={totals.avgPricePerEgg}
           />
-
+          <PeriodSummaryCard
+            paidSales={paidSales}
+            expenses={expenses}
+            granularity={avgGranularity}
+            value={avgPeriodValue}
+            onGranularityChange={onAvgGranularityChange}
+            onValueChange={onAvgPeriodValueChange}
+            availableYears={availableYears}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <PieCard
+            <BreakdownCard
               title="Sales by Egg Size"
-              data={sizeBreakdown}
-              colors={EGG_SIZE_COLORS}
-              empty={!hasSales}
-              emptyText="No sales yet"
-              valueFormatter={(v) => `${v.toLocaleString()} eggs`}
+              items={sizeBreakdown}
+              color={CHART.sizes}
+              formatValue={formatEggs}
+              emptyText="No paid sales yet"
+              total={totals.eggs}
             />
-            <PieCard
+            <BreakdownCard
               title="Expenses by Category"
-              data={expenseBreakdown}
-              colors={EXPENSE_COLORS}
-              empty={!hasExpenses}
+              items={expenseBreakdown}
+              color={CHART.expenses}
+              formatValue={formatCurrency}
               emptyText="No expenses yet"
-              valueFormatter={formatCurrency}
+              total={totals.spent}
             />
           </div>
         </>
@@ -738,211 +805,155 @@ function DashboardView({
   );
 }
 
-// Sales include a price per 30-egg tray between the unit and total prices.
-function PriceField({ label, quantity, perUnit, perTray, total, onPerUnitChange, onPerTrayChange, onTotalChange, perUnitCaption, totalCaption }) {
-  const hasTray = !!onPerTrayChange;
+// ── Forms ─────────────────────────────────────────────────────────────────
+
+// Records a new sale, or — given `sale` — edits that one in place of its
+// row in Records. Adding clears the per-sale fields afterwards (size, date
+// and payment status stay for the next entry); editing hands the result to
+// the parent, which closes the editor.
+function SaleForm({ sale, onSubmit, onCancel }) {
+  const editing = Boolean(sale);
+  const [eggSize, setEggSize] = useState(sale?.eggSize ?? 'Medium');
+  const [trays, setTrays] = useState(sale ? String(Math.floor(sale.quantity / TRAY_SIZE)) : '');
+  const [pcs, setPcs] = useState(sale ? String(sale.quantity % TRAY_SIZE) : '');
+  const [date, setDate] = useState(() => sale?.date ?? getTodayLocal());
+  const [isPending, setIsPending] = useState(sale?.status === 'pending');
+  const [description, setDescription] = useState(sale?.description ?? '');
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useSuccessFlag();
+
+  const q = trayPcsToTotal(trays, pcs) ?? 0;
+  const pricing = useSalePricing(q, sale);
+  const total = Number(pricing.total);
+  const hasTotal = pricing.total !== '' && Number.isFinite(total) && total >= 0;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (saving) return;
+    const quantity = trayPcsToTotal(trays, pcs);
+    if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
+    const pricePerEgg = Number(pricing.perEgg);
+    if (pricing.perEgg === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
+    if (!hasTotal || total >= 1e18) { setFormError('Enter a valid sale total.'); return; }
+    if (!date) { setFormError('Select a date.'); return; }
+    setFormError('');
+    setSuccess(false);
+    setSaving(true);
+    const note = description.trim();
+    try {
+      await onSubmit({
+        eggSize, quantity, date, pricePerEgg, totalPrice: total,
+        status: isPending ? 'pending' : 'paid',
+        // A new sale simply omits an empty note; an edit sends null so a
+        // note that was there gets cleared.
+        description: note || (editing ? null : undefined),
+      });
+      if (!editing) {
+        setTrays('');
+        setPcs('');
+        pricing.reset();
+        setDescription('');
+        setSuccess(true);
+      }
+    } catch (err) {
+      setFormError(api.errorMessage(err, editing ? 'Could not update this sale. Please try again.' : 'Could not save your sale. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <Field label={label}>
-      <div className={`grid gap-2 ${hasTray ? 'grid-cols-2 min-[360px]:grid-cols-3' : 'grid-cols-2'}`}>
-        <div>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-            <input
-              type="number" min="0" step="0.01"
-              aria-label={perUnitCaption}
-              value={perUnit}
-              onChange={(e) => onPerUnitChange(e.target.value)}
-              placeholder="0.00"
-              className={`${inputClasses} eggy-price-input pl-7 pr-2`}
-              style={inputStyle}
-            />
-          </div>
-          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{perUnitCaption}</span>
-        </div>
-        {hasTray && (
+    <section className={`eggy-card p-5 ${editing ? 'eggy-rise' : ''}`} style={editing ? { borderColor: COLORS.yolk, boxShadow: ELEVATION.lg } : undefined}>
+      <FormTitle icon={editing ? Pencil : Plus} color={COLORS.moss}>{editing ? 'Edit Sale' : 'Record a Sale'}</FormTitle>
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
+          <ChipGroup label="Egg size" options={EGG_SIZES} value={eggSize} onChange={setEggSize} shortLabels={EGG_SIZE_SHORT} />
+          <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} />
+          <PriceField
+            quantity={q}
+            perUnit={pricing.perEgg}
+            perTray={pricing.perTray}
+            total={pricing.total}
+            onPerUnitChange={pricing.changePerEgg}
+            onPerTrayChange={pricing.changePerTray}
+            onTotalChange={pricing.changeTotal}
+            perUnitCaption="Per egg"
+            totalCaption="Total sale"
+          />
           <div>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-              <input
-                type="number" min="0" step="0.01"
-                aria-label="Per tray"
-                value={perTray}
-                onChange={(e) => onPerTrayChange(e.target.value)}
-                placeholder="0.00"
-                className={`${inputClasses} eggy-price-input pl-7 pr-2`}
-                style={inputStyle}
-              />
-            </div>
-            <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>Per tray (30 eggs)</span>
-          </div>
-        )}
-        <div className={hasTray ? 'col-span-2 min-[360px]:col-span-1' : undefined}>
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: COLORS.muted }}>{CURRENCY}</span>
-            <input
-              type="number" min="0" step="0.01"
-              aria-label={totalCaption}
-              value={total}
-              onChange={(e) => onTotalChange(e.target.value)}
-              placeholder="0.00"
-              className={`${inputClasses} eggy-price-input pl-7 pr-2`}
-              style={inputStyle}
+            <span className="eggy-label">Payment</span>
+            <SegmentedControl
+              options={PAYMENT_OPTIONS}
+              value={isPending ? 'pending' : 'paid'}
+              onChange={(next) => setIsPending(next === 'pending')}
+              label="Payment status"
+              className="w-full [&_.eggy-segment-item]:py-2 [&_.eggy-segment-item]:text-sm"
             />
+            {isPending && (
+              <p className="eggy-hint eggy-fade-in">
+                The customer took the eggs but hasn&apos;t paid yet. It won&apos;t count as revenue until you mark it paid in Records.
+              </p>
+            )}
           </div>
-          <span className="block text-[11px] mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{totalCaption}</span>
-        </div>
-      </div>
-      {quantity <= 0 && (
-        <p className="text-xs mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{hasTray ? 'Enter a quantity above to calculate the sale total.' : 'Enter a quantity above to auto-fill the other price.'}</p>
-      )}
-    </Field>
-  );
-}
-
-function AddSaleForm({ onSubmit }) {
-  const [eggSize, setEggSize] = useState('Medium');
-  const [trays, setTrays] = useState('');
-  const [pcs, setPcs] = useState('');
-  const [date, setDate] = useState(getTodayLocal());
-  const [isPending, setIsPending] = useState(false);
-  const [description, setDescription] = useState('');
-  const [formError, setFormError] = useState('');
-  const [success, setSuccess] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!success) return;
-    const t = setTimeout(() => setSuccess(false), 2000);
-    return () => clearTimeout(t);
-  }, [success]);
-
-  const q = trayPcsToTotal(trays, pcs) ?? 0;
-
-  const {
-    perEgg: perUnitPrice, perTray: perTrayPrice, total: totalPrice,
-    changePerEgg: handlePerUnitChange, changePerTray: handlePerTrayChange,
-    changeTotal: handleTotalChange, reset: resetPricing,
-  } = useSalePricing(q);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (saving) return;
-    const quantity = trayPcsToTotal(trays, pcs);
-    if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
-    const pricePerEgg = Number(perUnitPrice);
-    if (perUnitPrice === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
-    if (totalPrice === '' || !Number.isFinite(Number(totalPrice)) || Number(totalPrice) < 0 || Number(totalPrice) >= 1e18) { setFormError('Enter a valid sale total.'); return; }
-    if (!date) { setFormError('Select a date.'); return; }
-    setFormError('');
-    setSuccess(false);
-    setSaving(true);
-    try {
-      await onSubmit({ eggSize, quantity, date, pricePerEgg, totalPrice: Number(totalPrice), status: isPending ? 'pending' : 'paid', description: description.trim() || undefined });
-      setTrays('');
-      setPcs('');
-      resetPricing();
-      setDescription('');
-      setSuccess(true);
-    } catch (err) {
-      setFormError(api.errorMessage(err, 'Could not save your sale. Please try again.'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="eggy-card p-5">
-      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
-        <Plus size={16} style={{ color: COLORS.moss }} /> Record a Sale
-      </h2>
-      <form onSubmit={handleSubmit}>
-        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
-          <Field label="Egg size">
-            <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
-              {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-          <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
-          <PriceField
-            label="Price"
-            quantity={q}
-            perUnit={perUnitPrice}
-            perTray={perTrayPrice}
-            total={totalPrice}
-            onPerUnitChange={handlePerUnitChange}
-            onPerTrayChange={handlePerTrayChange}
-            onTotalChange={handleTotalChange}
-            perUnitCaption="Per egg"
-            totalCaption="Total sale"
-          />
           <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} />
           </Field>
           <Field label="Description (optional)">
-            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} />
           </Field>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isPending}
-              onChange={(e) => setIsPending(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded"
-              style={{ accentColor: COLORS.yolk }}
-            />
-            <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-              Pending (utang) — customer took the eggs but hasn't paid yet
-            </span>
-          </label>
-          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-          <SaveFeedback visible={success}>{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</SaveFeedback>
-          <button
-            type="submit"
-            className={`eggy-btn eggy-focus w-full py-3 text-sm ${isPending ? 'eggy-btn-accent' : 'eggy-btn-primary'}`}
-            style={{ fontFamily: FONT_BODY }}
-          >
-            {saving ? 'Saving...' : isPending ? 'Add Pending Sale' : 'Add Sale'}
-          </button>
+          {formError && <p role="alert" className="text-sm text-brick">{formError}</p>}
+          {!editing && <SaveFeedback visible={success}>{isPending ? 'Pending sale recorded.' : 'Sale recorded.'}</SaveFeedback>}
+          {editing ? (
+            <EditActions saving={saving} onCancel={onCancel} />
+          ) : (
+            // The button repeats the total being saved, so the amount is
+            // confirmed at the moment of tapping — not only up in the field.
+            <button type="submit" className={`eggy-btn eggy-focus w-full py-3 text-sm ${isPending ? 'eggy-btn-accent' : 'eggy-btn-primary'}`}>
+              {saving ? 'Saving…' : (
+                <>
+                  {isPending ? 'Add Pending Sale' : 'Add Sale'}
+                  {hasTotal && <span className="tabular-nums font-medium opacity-80"> · {formatCurrency(total)}</span>}
+                </>
+              )}
+            </button>
+          )}
         </fieldset>
       </form>
-    </div>
+    </section>
   );
 }
 
-function AddExpenseForm({ onSubmit }) {
-  const [item, setItem] = useState('Feeds');
-  const [quantity, setQuantity] = useState('');
-  const [date, setDate] = useState(getTodayLocal());
-  const [perUnitPrice, setPerUnitPrice] = useState('');
-  const [totalPrice, setTotalPrice] = useState('');
-  const [description, setDescription] = useState('');
+// Same pattern as SaleForm, for expenses: per-item price and total stay
+// linked, so either can be typed.
+function ExpenseForm({ expense, onSubmit, onCancel }) {
+  const editing = Boolean(expense);
+  const [item, setItem] = useState(expense?.item ?? 'Feeds');
+  const [quantity, setQuantity] = useState(expense ? String(expense.quantity) : '');
+  const [date, setDate] = useState(() => expense?.date ?? getTodayLocal());
+  const [perUnitPrice, setPerUnitPrice] = useState(expense ? expense.price.toFixed(2) : '');
+  const [totalPrice, setTotalPrice] = useState(expense ? (expense.quantity * expense.price).toFixed(2) : '');
+  const [description, setDescription] = useState(expense?.description ?? '');
   const [formError, setFormError] = useState('');
-  const [success, setSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!success) return;
-    const t = setTimeout(() => setSuccess(false), 2000);
-    return () => clearTimeout(t);
-  }, [success]);
+  const [success, setSuccess] = useSuccessFlag();
 
   const q = Number(quantity) || 0;
+  const total = Number(totalPrice);
+  const hasTotal = totalPrice !== '' && Number.isFinite(total) && total >= 0;
 
   function handlePerUnitChange(value) {
     setPerUnitPrice(value);
     if (value === '') { setTotalPrice(''); return; }
     const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setTotalPrice((num * q).toFixed(2));
-    }
+    if (q > 0 && Number.isFinite(num) && num >= 0) setTotalPrice((num * q).toFixed(2));
   }
 
   function handleTotalChange(value) {
     setTotalPrice(value);
     if (value === '') { setPerUnitPrice(''); return; }
     const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setPerUnitPrice((num / q).toFixed(2));
-    }
+    if (q > 0 && Number.isFinite(num) && num >= 0) setPerUnitPrice((num / q).toFixed(2));
   }
 
   async function handleSubmit(e) {
@@ -955,37 +966,33 @@ function AddExpenseForm({ onSubmit }) {
     setFormError('');
     setSuccess(false);
     setSaving(true);
+    const note = description.trim();
     try {
-      await onSubmit({ item, quantity: q, date, price: pricePerItem, description: description.trim() || undefined });
-      setQuantity('');
-      setPerUnitPrice('');
-      setTotalPrice('');
-      setDescription('');
-      setSuccess(true);
+      await onSubmit({ item, quantity: q, date, price: pricePerItem, description: note || (editing ? null : undefined) });
+      if (!editing) {
+        setQuantity('');
+        setPerUnitPrice('');
+        setTotalPrice('');
+        setDescription('');
+        setSuccess(true);
+      }
     } catch (err) {
-      setFormError(api.errorMessage(err, 'Could not save your expense. Please try again.'));
+      setFormError(api.errorMessage(err, editing ? 'Could not update this expense. Please try again.' : 'Could not save your expense. Please try again.'));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="eggy-card p-5">
-      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
-        <Wallet size={16} style={{ color: COLORS.brick }} /> Record an Expense
-      </h2>
+    <section className={`eggy-card p-5 ${editing ? 'eggy-rise' : ''}`} style={editing ? { borderColor: COLORS.yolk, boxShadow: ELEVATION.lg } : undefined}>
+      <FormTitle icon={editing ? Pencil : Wallet} color={COLORS.brick}>{editing ? 'Edit Expense' : 'Record an Expense'}</FormTitle>
       <form onSubmit={handleSubmit}>
         <fieldset disabled={saving} className="eggy-form-flow space-y-4">
-          <Field label="Item">
-            <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
-              {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
+          <ChipGroup label="Item" options={EXPENSE_ITEMS} value={item} onChange={setItem} />
           <Field label="Quantity">
-            <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
+            <input {...WHOLE_NUMBER_INPUT} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={`${inputClasses} tabular-nums`} />
           </Field>
           <PriceField
-            label="Price"
             quantity={q}
             perUnit={perUnitPrice}
             total={totalPrice}
@@ -995,239 +1002,28 @@ function AddExpenseForm({ onSubmit }) {
             totalCaption="Total cost"
           />
           <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} />
           </Field>
           <Field label="Description (optional)">
-            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} />
           </Field>
-          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-          <SaveFeedback visible={success}>Expense recorded.</SaveFeedback>
-          <button
-            type="submit"
-            className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
-            style={{ fontFamily: FONT_BODY }}
-          >
-            {saving ? 'Saving...' : 'Add Expense'}
-          </button>
+          {formError && <p role="alert" className="text-sm text-brick">{formError}</p>}
+          {!editing && <SaveFeedback visible={success}>Expense recorded.</SaveFeedback>}
+          {editing ? (
+            <EditActions saving={saving} onCancel={onCancel} />
+          ) : (
+            <button type="submit" className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm">
+              {saving ? 'Saving…' : (
+                <>
+                  Add Expense
+                  {hasTotal && <span className="tabular-nums font-medium opacity-80"> · {formatCurrency(total)}</span>}
+                </>
+              )}
+            </button>
+          )}
         </fieldset>
       </form>
-    </div>
-  );
-}
-
-// Edits an existing sale in place of its RecordRow. Mirrors AddSaleForm's
-// fields/validation but seeds them from the record being edited and saves
-// via onSave instead of clearing back to a blank form.
-function EditSaleForm({ sale, onSave, onCancel }) {
-  const [eggSize, setEggSize] = useState(sale.eggSize);
-  const [trays, setTrays] = useState(String(Math.floor(sale.quantity / TRAY_SIZE)));
-  const [pcs, setPcs] = useState(String(sale.quantity % TRAY_SIZE));
-  const [date, setDate] = useState(sale.date);
-  const [isPending, setIsPending] = useState(sale.status === 'pending');
-  const [description, setDescription] = useState(sale.description || '');
-  const [formError, setFormError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const q = trayPcsToTotal(trays, pcs) ?? 0;
-
-  const {
-    perEgg: perUnitPrice, perTray: perTrayPrice, total: totalPrice,
-    changePerEgg: handlePerUnitChange, changePerTray: handlePerTrayChange,
-    changeTotal: handleTotalChange,
-  } = useSalePricing(q, sale);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (saving) return;
-    const quantity = trayPcsToTotal(trays, pcs);
-    if (quantity === null || quantity <= 0) { setFormError('Enter a quantity greater than 0 (trays and/or pcs).'); return; }
-    const pricePerEgg = Number(perUnitPrice);
-    if (perUnitPrice === '' || !Number.isFinite(pricePerEgg) || pricePerEgg < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
-    if (totalPrice === '' || !Number.isFinite(Number(totalPrice)) || Number(totalPrice) < 0 || Number(totalPrice) >= 1e18) { setFormError('Enter a valid sale total.'); return; }
-    if (!date) { setFormError('Select a date.'); return; }
-    setFormError('');
-    setSaving(true);
-    try {
-      await onSave({ eggSize, quantity, date, pricePerEgg, totalPrice: Number(totalPrice), status: isPending ? 'pending' : 'paid', description: description.trim() || null });
-    } catch (err) {
-      setFormError(api.errorMessage(err, 'Could not update this sale. Please try again.'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="eggy-card p-5 eggy-rise" style={{ borderColor: COLORS.yolk, boxShadow: ELEVATION.lg }}>
-      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
-        <Pencil size={16} style={{ color: COLORS.moss }} /> Edit Sale
-      </h2>
-      <form onSubmit={handleSubmit}>
-        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
-          <Field label="Egg size">
-            <select value={eggSize} onChange={(e) => setEggSize(e.target.value)} className={inputClasses} style={inputStyle}>
-              {EGG_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-          <TrayPcsField label="Quantity" trays={trays} pcs={pcs} onTraysChange={setTrays} onPcsChange={setPcs} unitLabel="eggs" />
-          <PriceField
-            label="Price"
-            quantity={q}
-            perUnit={perUnitPrice}
-            perTray={perTrayPrice}
-            total={totalPrice}
-            onPerUnitChange={handlePerUnitChange}
-            onPerTrayChange={handlePerTrayChange}
-            onTotalChange={handleTotalChange}
-            perUnitCaption="Per egg"
-            totalCaption="Total sale"
-          />
-          <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-          </Field>
-          <Field label="Description (optional)">
-            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. sold to Aling Nena" className={inputClasses} style={inputStyle} />
-          </Field>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isPending}
-              onChange={(e) => setIsPending(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded"
-              style={{ accentColor: COLORS.yolk }}
-            />
-            <span className="text-sm" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>
-              Pending (utang) — customer took the eggs but hasn't paid yet
-            </span>
-          </label>
-          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
-              style={{ fontFamily: FONT_BODY }}
-            >
-              {saving ? 'Saving…' : 'Save Changes'}
-            </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={saving}
-              className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
-              style={{ fontFamily: FONT_BODY }}
-            >
-              Cancel
-            </button>
-          </div>
-        </fieldset>
-      </form>
-    </div>
-  );
-}
-
-// Same idea as EditSaleForm, for expenses.
-function EditExpenseForm({ expense, onSave, onCancel }) {
-  const [item, setItem] = useState(expense.item);
-  const [quantity, setQuantity] = useState(String(expense.quantity));
-  const [date, setDate] = useState(expense.date);
-  const [perUnitPrice, setPerUnitPrice] = useState(expense.price.toFixed(2));
-  const [totalPrice, setTotalPrice] = useState((expense.quantity * expense.price).toFixed(2));
-  const [description, setDescription] = useState(expense.description || '');
-  const [formError, setFormError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const q = Number(quantity) || 0;
-
-  function handlePerUnitChange(value) {
-    setPerUnitPrice(value);
-    if (value === '') { setTotalPrice(''); return; }
-    const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setTotalPrice((num * q).toFixed(2));
-    }
-  }
-
-  function handleTotalChange(value) {
-    setTotalPrice(value);
-    if (value === '') { setPerUnitPrice(''); return; }
-    const num = Number(value);
-    if (q > 0 && Number.isFinite(num) && num >= 0) {
-      setPerUnitPrice((num / q).toFixed(2));
-    }
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (saving) return;
-    if (!Number.isSafeInteger(q) || q <= 0) { setFormError('Enter a whole-number quantity greater than 0.'); return; }
-    const pricePerItem = Number(perUnitPrice);
-    if (perUnitPrice === '' || !Number.isFinite(pricePerItem) || pricePerItem < 0) { setFormError('Enter a valid price of 0 or more.'); return; }
-    if (!date) { setFormError('Select a date.'); return; }
-    setFormError('');
-    setSaving(true);
-    try {
-      await onSave({ item, quantity: q, date, price: pricePerItem, description: description.trim() || null });
-    } catch (err) {
-      setFormError(api.errorMessage(err, 'Could not update this expense. Please try again.'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="eggy-card p-5 eggy-rise" style={{ borderColor: COLORS.yolk, boxShadow: ELEVATION.lg }}>
-      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
-        <Pencil size={16} style={{ color: COLORS.brick }} /> Edit Expense
-      </h2>
-      <form onSubmit={handleSubmit}>
-        <fieldset disabled={saving} className="eggy-form-flow space-y-4">
-          <Field label="Item">
-            <select value={item} onChange={(e) => setItem(e.target.value)} className={inputClasses} style={inputStyle}>
-              {EXPENSE_ITEMS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-          <Field label="Quantity">
-            <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 2" className={inputClasses} style={inputStyle} />
-          </Field>
-          <PriceField
-            label="Price"
-            quantity={q}
-            perUnit={perUnitPrice}
-            total={totalPrice}
-            onPerUnitChange={handlePerUnitChange}
-            onTotalChange={handleTotalChange}
-            perUnitCaption="Per item"
-            totalCaption="Total cost"
-          />
-          <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
-          </Field>
-          <Field label="Description (optional)">
-            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="e.g. 50kg layer feed from Cruz Agrivet" className={inputClasses} style={inputStyle} />
-          </Field>
-          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="eggy-btn eggy-btn-primary eggy-focus flex-1 py-3 text-sm"
-              style={{ fontFamily: FONT_BODY }}
-            >
-              {saving ? 'Saving…' : 'Save Changes'}
-            </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={saving}
-              className="eggy-btn eggy-btn-quiet eggy-focus flex-1 py-3 text-sm"
-              style={{ fontFamily: FONT_BODY }}
-            >
-              Cancel
-            </button>
-          </div>
-        </fieldset>
-      </form>
-    </div>
+    </section>
   );
 }
 
@@ -1236,31 +1032,27 @@ function AddHarvestForm({ onSubmit }) {
   const [harvestedPcs, setHarvestedPcs] = useState('');
   const [rejectedTrays, setRejectedTrays] = useState('');
   const [rejectedPcs, setRejectedPcs] = useState('');
-  const [date, setDate] = useState(getTodayLocal());
+  const [date, setDate] = useState(getTodayLocal);
   const [formError, setFormError] = useState('');
-  const [success, setSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useSuccessFlag();
 
-  useEffect(() => {
-    if (!success) return;
-    const t = setTimeout(() => setSuccess(false), 2000);
-    return () => clearTimeout(t);
-  }, [success]);
+  const harvested = trayPcsToTotal(harvestedTrays, harvestedPcs);
+  const rejected = trayPcsToTotal(rejectedTrays, rejectedPcs);
+  const good = harvested !== null && rejected !== null && harvested > 0 && rejected <= harvested ? harvested - rejected : null;
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (saving) return;
-    const h = trayPcsToTotal(harvestedTrays, harvestedPcs);
-    const r = trayPcsToTotal(rejectedTrays, rejectedPcs);
-    if (h === null) { setFormError('Enter a valid number of trays/pcs harvested (0 or more).'); return; }
-    if (r === null) { setFormError('Enter a valid number of trays/pcs rejected (0 or more).'); return; }
-    if (r > h) { setFormError('Rejected eggs cannot exceed harvested eggs.'); return; }
+    if (harvested === null) { setFormError('Enter a valid number of trays/pcs harvested (0 or more).'); return; }
+    if (rejected === null) { setFormError('Enter a valid number of trays/pcs rejected (0 or more).'); return; }
+    if (rejected > harvested) { setFormError('Rejected eggs cannot exceed harvested eggs.'); return; }
     if (!date) { setFormError('Select a date.'); return; }
     setFormError('');
     setSuccess(false);
     setSaving(true);
     try {
-      await onSubmit({ harvested: h, rejected: r, date });
+      await onSubmit({ harvested, rejected, date });
       setHarvestedTrays('');
       setHarvestedPcs('');
       setRejectedTrays('');
@@ -1274,41 +1066,48 @@ function AddHarvestForm({ onSubmit }) {
   }
 
   return (
-    <div className="eggy-card p-5">
-      <h2 className="font-semibold mb-4 flex items-center gap-2" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
-        <Egg size={16} style={{ color: COLORS.yolk }} /> Record a Harvest
-      </h2>
+    <section className="eggy-card p-5">
+      <FormTitle icon={Egg} color={COLORS.yolkDeep}>Record a Harvest</FormTitle>
       <form onSubmit={handleSubmit}>
         <fieldset disabled={saving} className="eggy-form-flow space-y-4">
-          <TrayPcsField label="Eggs harvested" trays={harvestedTrays} pcs={harvestedPcs} onTraysChange={setHarvestedTrays} onPcsChange={setHarvestedPcs} unitLabel="eggs" />
-          <TrayPcsField label="Eggs rejected" trays={rejectedTrays} pcs={rejectedPcs} onTraysChange={setRejectedTrays} onPcsChange={setRejectedPcs} unitLabel="eggs" />
+          <TrayPcsField label="Eggs harvested" trays={harvestedTrays} pcs={harvestedPcs} onTraysChange={setHarvestedTrays} onPcsChange={setHarvestedPcs} />
+          <TrayPcsField label="Eggs rejected" trays={rejectedTrays} pcs={rejectedPcs} onTraysChange={setRejectedTrays} onPcsChange={setRejectedPcs} />
           <Field label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} style={inputStyle} />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClasses} />
           </Field>
-          {formError && <p role="alert" className="text-sm" style={{ color: COLORS.brick }}>{formError}</p>}
+          {formError && <p role="alert" className="text-sm text-brick">{formError}</p>}
           <SaveFeedback visible={success}>Harvest recorded.</SaveFeedback>
-          <button
-            type="submit"
-            className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm"
-            style={{ fontFamily: FONT_BODY }}
-          >
-            {saving ? 'Saving...' : 'Add Harvest'}
+          <button type="submit" className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 text-sm">
+            {saving ? 'Saving…' : (
+              <>
+                Add Harvest
+                {good !== null && <span className="tabular-nums font-medium opacity-80"> · {formatCount(good)} good</span>}
+              </>
+            )}
           </button>
         </fieldset>
       </form>
-    </div>
+    </section>
   );
 }
+
+// ── Records ───────────────────────────────────────────────────────────────
 
 function EmptyRecords({ text }) {
   return (
     <div className="eggy-card p-10 text-center">
-      <p className="text-sm" style={{ color: COLORS.muted, fontFamily: FONT_BODY }}>{text}</p>
+      <p className="text-sm text-muted">{text}</p>
     </div>
   );
 }
 
-function RecordRow({ title, subtitle, description, amount, amountColor, badge, secondaryAction, confirming, removing, busy, onEditClick, onDeleteClick, onCancel, delay = 0 }) {
+// Memoized, and every callback takes the row's id, so a row only re-renders
+// when something it shows actually changed (its own confirm/saving state),
+// not every time a sibling does.
+const RecordRow = memo(function RecordRow({
+  id, title, subtitle, description, amount, amountColor, accent, pending, confirming, removing, busy, delay = 0,
+  onEdit, onRequestDelete, onConfirmDelete, onCancelDelete, onMarkPaid,
+}) {
   const reducedMotion = useReducedMotion();
   return (
     <motion.div
@@ -1323,99 +1122,88 @@ function RecordRow({ title, subtitle, description, amount, amountColor, badge, s
         overflow: 'hidden',
         // A colour-coded edge on the left makes money-in vs money-out
         // scannable down the list without reading a single figure.
-        borderLeft: `3px solid ${amountColor}`,
+        borderLeft: `3px solid ${accent}`,
       }}
     >
-      {/* The description/date text gets the full row width and the actions
-          wrap below it when space is tight, rather than sharing one line —
-          on a phone that shared line squeezed the text down to unreadable
-          stubs ("Reject · 15 e…", "Aug 23, 2026 · …"). On a wide screen
-          there's room, so the actions sit back up on the same line. */}
-      <div className="flex items-start gap-3 flex-wrap">
+      {/* The text column gets the full remaining width; the amount and the
+          two small icon actions stack in a narrow column on the right. They
+          used to share the title's line, which squeezed titles like "Extra
+          Large · 520 eggs" onto two lines on a phone. */}
+      <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="font-semibold text-sm" style={{ color: COLORS.ink, fontFamily: FONT_BODY }}>{title}</p>
-            {badge}
+            <p className="font-semibold text-[15px] leading-snug text-ink">{title}</p>
+            {pending && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-[0.06em] text-pending bg-[#E5A62E26]">
+                Unpaid
+              </span>
+            )}
           </div>
-          <p className="text-xs mt-1" style={{ color: COLORS.muted, fontFamily: FONT_BODY, ...NUM_TABULAR }}>{subtitle}</p>
-          {description && (
-            <p
-              className="text-xs mt-1.5 pl-2"
-              style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY, borderLeft: `2px solid ${COLORS.hairline}` }}
-            >
-              {description}
-            </p>
+          <p className="text-xs mt-0.5 text-muted tabular-nums">{subtitle}</p>
+          {description && <p className="text-xs mt-1.5 pl-2 text-ink-soft border-l-2 border-hairline">{description}</p>}
+        </div>
+        <div className="shrink-0 flex flex-col items-end">
+          <span className="font-semibold text-base leading-snug tabular-nums" style={{ color: amountColor }}>{amount}</span>
+          {!confirming && (
+            <fieldset disabled={busy || removing} className="flex items-center -mr-2 -mb-1.5 mt-0.5">
+              {onEdit && (
+                <button type="button" onClick={() => onEdit(id)} aria-label="Edit entry" className="eggy-icon-btn eggy-focus">
+                  <Pencil size={16} />
+                </button>
+              )}
+              <button type="button" onClick={() => onRequestDelete(id)} aria-label="Delete entry" className="eggy-icon-btn eggy-icon-btn-danger eggy-focus">
+                <Trash2 size={16} />
+              </button>
+            </fieldset>
           )}
         </div>
-        <span
-          className="font-bold text-base shrink-0"
-          style={{ color: amountColor, fontFamily: FONT_DISPLAY, letterSpacing: '-0.01em', ...NUM_TABULAR }}
-        >
-          {amount}
-        </span>
-        {/* With a status button present the cluster is too wide to share a
-            line on a phone, so it drops below. With just the two icon
-            actions it fits inline, which keeps the common (already-settled)
-            row a compact two lines instead of three. */}
-        <fieldset disabled={busy || removing} className={`flex min-w-0 items-center justify-end gap-1 ${secondaryAction || confirming ? 'w-full sm:w-auto mt-1.5 sm:mt-0' : 'w-auto -my-1'}`}>
-        {confirming ? (
-          <>
-            {/* Says what's about to happen — the old version swapped in a bare
-                Delete/Cancel pair with no indication of what it applied to. */}
-            <span className="text-xs mr-auto font-medium" style={{ color: COLORS.brick, fontFamily: FONT_BODY }}>Delete this entry?</span>
-            <button
-              type="button"
-              onClick={onDeleteClick}
-              className="eggy-btn eggy-focus text-xs px-3 py-1.5"
-              style={{ backgroundColor: COLORS.brick, color: '#FFF', fontFamily: FONT_BODY, boxShadow: ELEVATION.sm }}
-            >
-              {removing ? 'Deleting…' : 'Delete'}
-            </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              className="eggy-btn eggy-btn-quiet eggy-focus text-xs px-3 py-1.5"
-              style={{ fontFamily: FONT_BODY }}
-            >
-              Cancel
-            </button>
-          </>
-        ) : (
-          <>
-            {secondaryAction}
-            {onEditClick && (
-              <button type="button" onClick={onEditClick} aria-label="Edit entry" className="eggy-icon-btn eggy-focus">
-                <Pencil size={16} />
-              </button>
-            )}
-            <button type="button" onClick={onDeleteClick} aria-label="Delete entry" className="eggy-icon-btn eggy-icon-btn-danger eggy-focus">
-              <Trash2 size={16} />
-            </button>
-          </>
-        )}
-        </fieldset>
       </div>
+      {confirming ? (
+        // Says what's about to happen, right on the row it applies to.
+        <fieldset disabled={removing} className="mt-2.5 flex items-center gap-2">
+          <span className="text-xs mr-auto font-medium text-brick">Delete this entry?</span>
+          <button type="button" onClick={() => onConfirmDelete(id)} className="eggy-btn eggy-btn-danger eggy-focus text-xs px-3 py-1.5">
+            {removing ? 'Deleting…' : 'Delete'}
+          </button>
+          <button type="button" onClick={onCancelDelete} className="eggy-btn eggy-btn-quiet eggy-focus text-xs px-3 py-1.5">
+            Cancel
+          </button>
+        </fieldset>
+      ) : pending && onMarkPaid ? (
+        // Only unpaid sales carry an inline status button: settling one is
+        // the action that actually gets taken. The reverse (marking a paid
+        // sale unpaid) is rare and lives in Edit.
+        <fieldset disabled={busy || removing} className="mt-2.5">
+          <button
+            type="button"
+            onClick={() => onMarkPaid(id)}
+            className="eggy-btn eggy-btn-accent eggy-focus w-full py-2 text-sm flex items-center justify-center gap-1.5"
+          >
+            <CheckCircle2 size={16} />
+            {busy ? 'Saving…' : 'Mark as paid'}
+          </button>
+        </fieldset>
+      ) : null}
     </motion.div>
   );
-}
+});
 
 function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense, onDeleteHarvest, onUpdateSaleStatus, onUpdateSale, onUpdateExpense }) {
   const [subTab, setSubTab] = useState('sales');
   const [direction, setDirection] = useState(1);
   const [confirmId, setConfirmId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
-  const [workingIds, setWorkingIds] = useState(new Set());
+  const [workingIds, setWorkingIds] = useState(() => new Set());
   const [actionError, setActionError] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [saleSearch, setSaleSearch] = useState('');
   const [saleStatusFilter, setSaleStatusFilter] = useState('all');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Most-recently-added first — not the sale/expense/harvest date, which is
-  // user-entered and can be backdated, so it doesn't reflect entry order.
-  const byRecentlyAdded = (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
-  const sortedSales = useMemo(() => [...sales].sort(byRecentlyAdded), [sales]);
-  const sortedExpenses = useMemo(() => [...expenses].sort(byRecentlyAdded), [expenses]);
-  const sortedHarvests = useMemo(() => [...harvests].sort(byRecentlyAdded), [harvests]);
+  const sortedSales = useMemo(() => sortByRecentlyAdded(sales), [sales]);
+  const sortedExpenses = useMemo(() => sortByRecentlyAdded(expenses), [expenses]);
+  const sortedHarvests = useMemo(() => sortByRecentlyAdded(harvests), [harvests]);
+  const unpaidCount = useMemo(() => sales.reduce((n, s) => n + (s.status === 'pending' ? 1 : 0), 0), [sales]);
 
   // Records saved before the status field existed (or a sale marked as
   // settled) come through with `status` unset, not `'paid'` — treat unset
@@ -1424,39 +1212,38 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
     const query = saleSearch.trim().toLowerCase();
     return sortedSales.filter((s) => {
       const isPending = s.status === 'pending';
-      const matchesStatus =
-        saleStatusFilter === 'all' ||
-        (saleStatusFilter === 'pending' ? isPending : !isPending);
+      const matchesStatus = saleStatusFilter === 'all' || (saleStatusFilter === 'pending' ? isPending : !isPending);
       const matchesSearch = query === '' || (s.description || '').toLowerCase().includes(query);
       return matchesStatus && matchesSearch;
     });
   }, [sortedSales, saleSearch, saleStatusFilter]);
 
-  async function handleDeleteClick(id) {
-    setEditingId(null);
-    if (confirmId === id) {
-      setActionError('');
-      setRemovingId(id);
-      try {
-        if (subTab === 'sales') await onDeleteSale(id);
-        else if (subTab === 'expenses') await onDeleteExpense(id);
-        else await onDeleteHarvest(id);
-        setConfirmId(null);
-      } catch (err) {
-        setActionError(api.errorMessage(err, 'Could not delete this entry. Please try again.'));
-      } finally {
-        setRemovingId(null);
-      }
-    } else {
-      setConfirmId(id);
-    }
-  }
+  const list = subTab === 'sales' ? filteredSales : subTab === 'expenses' ? sortedExpenses : sortedHarvests;
+  const visible = list.slice(0, visibleCount);
+  const currentYear = new Date().getFullYear();
 
-  async function handleStatusChange(id, status) {
+  // Stable handlers (they take the row's id) so memoized rows stay put.
+  const deleteRecord = { sales: onDeleteSale, expenses: onDeleteExpense, harvests: onDeleteHarvest }[subTab];
+  const requestDelete = useCallback((id) => { setEditingId(null); setConfirmId(id); }, []);
+  const cancelDelete = useCallback(() => setConfirmId(null), []);
+  const startEdit = useCallback((id) => { setConfirmId(null); setEditingId(id); }, []);
+  const confirmDelete = useCallback(async (id) => {
+    setActionError('');
+    setRemovingId(id);
+    try {
+      await deleteRecord(id);
+      setConfirmId(null);
+    } catch (err) {
+      setActionError(api.errorMessage(err, 'Could not delete this entry. Please try again.'));
+    } finally {
+      setRemovingId(null);
+    }
+  }, [deleteRecord]);
+  const markPaid = useCallback(async (id) => {
     setActionError('');
     setWorkingIds((previous) => new Set([...previous, id]));
     try {
-      await onUpdateSaleStatus(id, status);
+      await onUpdateSaleStatus(id, 'paid');
     } catch (err) {
       setActionError(api.errorMessage(err, 'Could not update this sale. Please try again.'));
     } finally {
@@ -1466,35 +1253,112 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
         return next;
       });
     }
+  }, [onUpdateSaleStatus]);
+
+  function changeSubTab(next) {
+    setDirection(RECORD_TABS.indexOf(next) > RECORD_TABS.indexOf(subTab) ? 1 : -1);
+    setSubTab(next);
+    setConfirmId(null);
+    setEditingId(null);
+    setVisibleCount(PAGE_SIZE);
   }
 
-  async function handleSaveSale(id, fields) {
-    await onUpdateSale(id, fields);
-    setEditingId(null);
+  function renderRow(record, index) {
+    // Rows revealed by "Show more" cascade in from the top of their batch.
+    const delay = rowDelay(index % PAGE_SIZE);
+    const shared = {
+      id: record.id,
+      delay,
+      confirming: confirmId === record.id,
+      removing: removingId === record.id,
+      onRequestDelete: requestDelete,
+      onConfirmDelete: confirmDelete,
+      onCancelDelete: cancelDelete,
+    };
+    if (subTab === 'sales') {
+      if (editingId === record.id) {
+        return (
+          <SaleForm
+            key={record.id}
+            sale={record}
+            onSubmit={async (fields) => { await onUpdateSale(record.id, fields); setEditingId(null); }}
+            onCancel={() => setEditingId(null)}
+          />
+        );
+      }
+      const pending = record.status === 'pending';
+      return (
+        <RecordRow
+          key={record.id}
+          {...shared}
+          title={`${record.eggSize} · ${formatTrays(record.quantity)}`}
+          subtitle={`${formatShortDate(record.date, currentYear)} · ${formatEggs(record.quantity)} · ${formatCurrency(record.pricePerEgg)}/egg`}
+          description={record.description}
+          amount={formatCurrency(saleTotal(record))}
+          amountColor={pending ? COLORS.pending : COLORS.moss}
+          accent={pending ? COLORS.yolk : COLORS.moss}
+          pending={pending}
+          busy={workingIds.has(record.id)}
+          onEdit={startEdit}
+          onMarkPaid={markPaid}
+        />
+      );
+    }
+    if (subTab === 'expenses') {
+      if (editingId === record.id) {
+        return (
+          <ExpenseForm
+            key={record.id}
+            expense={record}
+            onSubmit={async (fields) => { await onUpdateExpense(record.id, fields); setEditingId(null); }}
+            onCancel={() => setEditingId(null)}
+          />
+        );
+      }
+      return (
+        <RecordRow
+          key={record.id}
+          {...shared}
+          title={`${record.item} · ${record.quantity}×`}
+          subtitle={`${formatShortDate(record.date, currentYear)} · ${formatCurrency(record.price)} each`}
+          description={record.description}
+          amount={formatCurrency(expenseTotal(record))}
+          amountColor={COLORS.brick}
+          accent={COLORS.brick}
+          onEdit={startEdit}
+        />
+      );
+    }
+    return (
+      <RecordRow
+        key={record.id}
+        {...shared}
+        title={`${formatEggs(record.harvested)} harvested`}
+        subtitle={`${formatShortDate(record.date, currentYear)} · ${formatCount(record.rejected)} rejected`}
+        amount={`${formatCount(record.harvested - record.rejected)} good`}
+        amountColor={COLORS.moss}
+        accent={COLORS.moss}
+      />
+    );
   }
 
-  async function handleSaveExpense(id, fields) {
-    await onUpdateExpense(id, fields);
-    setEditingId(null);
-  }
+  const emptyText = {
+    sales: sortedSales.length === 0 ? 'No sales recorded yet.' : 'No sales match your search.',
+    expenses: 'No expenses recorded yet.',
+    harvests: 'No harvests recorded yet.',
+  }[subTab];
 
   return (
     <div className="space-y-3">
       {actionError && <ErrorBanner message={actionError} onClose={() => setActionError('')} />}
-      {/* Sticky so you can switch ledgers without scrolling back up through
-          forty-odd rows first. */}
+      {/* Sticky just under the header, so you can switch ledgers without
+          scrolling back up through forty-odd rows first. */}
       <SegmentedControl
-        className="eggy-record-segment sticky top-[76px] z-10"
+        className="eggy-record-segment sticky top-16 z-10"
         style={{ boxShadow: ELEVATION.sm }}
         label="Record type"
         value={subTab}
-        onChange={(next) => {
-          const order = ['sales', 'expenses', 'harvests'];
-          setDirection(order.indexOf(next) > order.indexOf(subTab) ? 1 : -1);
-          setSubTab(next);
-          setConfirmId(null);
-          setEditingId(null);
-        }}
+        onChange={changeSubTab}
         options={[
           { id: 'sales', label: 'Sales', count: sales.length },
           { id: 'expenses', label: 'Expenses', count: expenses.length },
@@ -1505,170 +1369,62 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
       <ScreenTransition viewKey={subTab} direction={direction}>
         <div className="space-y-3">
           {subTab === 'sales' && sales.length > 0 && (
-            <div className="flex gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[160px]">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: COLORS.muted }} />
+            <div className="space-y-2">
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted" />
                 <input
-                  type="text"
+                  type="search"
                   value={saleSearch}
-                  onChange={(e) => setSaleSearch(e.target.value)}
+                  onChange={(e) => { setSaleSearch(e.target.value); setVisibleCount(PAGE_SIZE); }}
                   placeholder="Search description…"
                   aria-label="Search sales by description"
-                  className={inputClasses}
-                  style={{ ...inputStyle, paddingLeft: 36, paddingRight: saleSearch ? 36 : undefined }}
+                  className={`${inputClasses} pl-9 ${saleSearch ? 'pr-10' : ''} [&::-webkit-search-cancel-button]:appearance-none`}
                 />
                 {saleSearch && (
                   <button
                     type="button"
-                    onClick={() => setSaleSearch('')}
+                    onClick={() => { setSaleSearch(''); setVisibleCount(PAGE_SIZE); }}
                     aria-label="Clear search"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 eggy-icon-btn eggy-focus"
-                    style={{ padding: 4 }}
+                    className="eggy-icon-btn eggy-focus absolute right-1 top-1/2 -translate-y-1/2"
                   >
-                    <X size={14} />
+                    <X size={16} />
                   </button>
                 )}
               </div>
-              <select
+              {/* One tap per filter, with counts, instead of a dropdown —
+                  "Unpaid (3)" also answers "who still owes us?" at a glance. */}
+              <SegmentedControl
+                label="Filter sales by status"
                 value={saleStatusFilter}
-                onChange={(e) => setSaleStatusFilter(e.target.value)}
-                aria-label="Filter sales by status"
-                className={inputClasses}
-                style={{ ...inputStyle, width: 'auto' }}
-              >
-                <option value="all">All statuses</option>
-                <option value="paid">Paid</option>
-                <option value="pending">Pending</option>
-              </select>
+                onChange={(next) => { setSaleStatusFilter(next); setVisibleCount(PAGE_SIZE); }}
+                options={[
+                  { id: 'all', label: 'All', count: sales.length },
+                  { id: 'paid', label: 'Paid', count: sales.length - unpaidCount },
+                  { id: 'pending', label: 'Unpaid', count: unpaidCount },
+                ]}
+              />
             </div>
           )}
 
-          {subTab === 'sales' && (
-            sortedSales.length === 0 ? (
-              <EmptyRecords text="No sales recorded yet." />
-            ) : filteredSales.length === 0 ? (
-              <EmptyRecords text="No sales match your search." />
-            ) : (
-              <div className="space-y-2">
-                <AnimatePresence initial={false}>
-                  {filteredSales.map((s, i) => (
-                    editingId === s.id ? (
-                      <EditSaleForm
-                        key={s.id}
-                        sale={s}
-                        onSave={(fields) => handleSaveSale(s.id, fields)}
-                        onCancel={() => setEditingId(null)}
-                      />
-                    ) : (
-                      <RecordRow
-                        key={s.id}
-                        delay={rowDelay(i)}
-                        title={`${s.eggSize} · ${s.quantity} eggs`}
-                        subtitle={`${formatDateDisplay(s.date)} · ${formatCurrency(s.pricePerEgg)}/egg`}
-                        description={s.description}
-                        amount={formatCurrency(saleTotal(s))}
-                        amountColor={s.status === 'pending' ? COLORS.yolkDeep : COLORS.moss}
-                        badge={s.status === 'pending' && (
-                          <span
-                            className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase"
-                            style={{
-                              backgroundColor: `${COLORS.yolk}24`,
-                              color: COLORS.yolkDeep,
-                              fontFamily: FONT_BODY,
-                              letterSpacing: '0.06em',
-                            }}
-                          >
-                            Unpaid
-                          </span>
-                        )}
-                        // Only unpaid sales carry an inline status button: settling
-                        // one is the action that actually gets taken. Putting the
-                        // reverse on all ~40 settled rows cost each of them a whole
-                        // extra line for a correction that's rare — it's still
-                        // available through Edit, which has the same checkbox.
-                        secondaryAction={s.status === 'pending' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleStatusChange(s.id, 'paid')}
-                            className="eggy-btn eggy-btn-accent eggy-focus text-xs px-3 py-1.5 whitespace-nowrap"
-                            style={{ fontFamily: FONT_BODY }}
-                          >
-                            {workingIds.has(s.id) ? 'Saving...' : 'Mark Paid'}
-                          </button>
-                        ) : null}
-                        confirming={confirmId === s.id}
-                        removing={removingId === s.id}
-                        busy={workingIds.has(s.id)}
-                        onEditClick={() => setEditingId(s.id)}
-                        onDeleteClick={() => handleDeleteClick(s.id)}
-                        onCancel={() => setConfirmId(null)}
-                      />
-                    )
-                  ))}
-                </AnimatePresence>
-              </div>
-            )
+          {list.length === 0 ? (
+            <EmptyRecords text={emptyText} />
+          ) : (
+            <div className="space-y-2">
+              <AnimatePresence initial={false}>
+                {visible.map(renderRow)}
+              </AnimatePresence>
+            </div>
           )}
 
-          {subTab === 'expenses' && (
-            sortedExpenses.length === 0 ? (
-              <EmptyRecords text="No expenses recorded yet." />
-            ) : (
-              <div className="space-y-2">
-                <AnimatePresence initial={false}>
-                  {sortedExpenses.map((e, i) => (
-                    editingId === e.id ? (
-                      <EditExpenseForm
-                        key={e.id}
-                        expense={e}
-                        onSave={(fields) => handleSaveExpense(e.id, fields)}
-                        onCancel={() => setEditingId(null)}
-                      />
-                    ) : (
-                      <RecordRow
-                        key={e.id}
-                        delay={rowDelay(i)}
-                        title={`${e.item} · ${e.quantity}x`}
-                        subtitle={`${formatDateDisplay(e.date)} · ${formatCurrency(e.price)} each`}
-                        description={e.description}
-                        amount={formatCurrency(e.quantity * e.price)}
-                        amountColor={COLORS.brick}
-                        confirming={confirmId === e.id}
-                        removing={removingId === e.id}
-                        onEditClick={() => setEditingId(e.id)}
-                        onDeleteClick={() => handleDeleteClick(e.id)}
-                        onCancel={() => setConfirmId(null)}
-                      />
-                    )
-                  ))}
-                </AnimatePresence>
-              </div>
-            )
-          )}
-
-          {subTab === 'harvests' && (
-            sortedHarvests.length === 0 ? (
-              <EmptyRecords text="No harvests recorded yet." />
-            ) : (
-              <div className="space-y-2">
-                <AnimatePresence initial={false}>
-                  {sortedHarvests.map((h, i) => (
-                    <RecordRow
-                      key={h.id}
-                      delay={rowDelay(i)}
-                      title={`${h.harvested} eggs harvested`}
-                      subtitle={`${formatDateDisplay(h.date)} · ${h.rejected} rejected`}
-                      amount={`${(h.harvested - h.rejected).toLocaleString()} good`}
-                      amountColor={COLORS.moss}
-                      confirming={confirmId === h.id}
-                      removing={removingId === h.id}
-                      onDeleteClick={() => handleDeleteClick(h.id)}
-                      onCancel={() => setConfirmId(null)}
-                    />
-                  ))}
-                </AnimatePresence>
-              </div>
-            )
+          {list.length > visibleCount && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+              className="eggy-btn eggy-btn-quiet eggy-focus w-full py-3 text-sm"
+            >
+              Show {Math.min(PAGE_SIZE, list.length - visibleCount)} more
+              <span className="font-normal text-muted"> · {visibleCount} of {list.length}</span>
+            </button>
           )}
         </div>
       </ScreenTransition>
@@ -1676,35 +1432,36 @@ function RecordsView({ sales, expenses, harvests, onDeleteSale, onDeleteExpense,
   );
 }
 
-function TabBar({ tab, setTab }) {
-  const reducedMotion = useReducedMotion();
-  // Short labels: five cells across a 390px phone gives each ~78px, and the
-  // old "Add Expense"/"Add Harvest" ran into each other with no gap. The
+// ── Navigation & shell ────────────────────────────────────────────────────
+
+const TABS = [
+  // Short labels: five cells across a 390px phone gives each ~78px. The
   // icon already carries the "add" sense, so the noun alone is enough — the
   // full phrasing stays on aria-label for screen readers.
-  const tabs = [
-    { id: 'dashboard', label: 'Home', title: 'Dashboard', icon: LayoutDashboard },
-    { id: 'addSale', label: 'Sale', title: 'Add Sale', icon: Plus },
-    { id: 'addExpense', label: 'Expense', title: 'Add Expense', icon: Wallet },
-    { id: 'addHarvest', label: 'Harvest', title: 'Add Harvest', icon: Egg },
-    { id: 'records', label: 'Records', title: 'Records', icon: ClipboardList },
-  ];
+  { id: 'dashboard', label: 'Home', title: 'Dashboard', icon: LayoutDashboard },
+  { id: 'addSale', label: 'Sale', title: 'Add Sale', icon: Plus },
+  { id: 'addExpense', label: 'Expense', title: 'Add Expense', icon: Wallet },
+  { id: 'addHarvest', label: 'Harvest', title: 'Add Harvest', icon: Egg },
+  { id: 'records', label: 'Records', title: 'Records', icon: ClipboardList },
+];
+
+const TabBar = memo(function TabBar({ tab, onSelect }) {
+  const reducedMotion = useReducedMotion();
   return (
     <LayoutGroup id="main-navigation">
       <motion.nav layoutRoot aria-label="Main navigation" className="eggy-tabbar fixed bottom-0 left-0 right-0 z-20">
         <div className="max-w-4xl mx-auto grid grid-cols-5">
-          {tabs.map((t) => {
+          {TABS.map((t) => {
             const Icon = t.icon;
             const active = tab === t.id;
             return (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => tab !== t.id && setTab(t.id)}
+                onClick={() => onSelect(t.id)}
                 aria-label={t.title}
                 aria-current={active ? 'page' : undefined}
                 className={`eggy-tab eggy-focus flex flex-col items-center gap-1 pt-2 pb-2.5 px-1 text-[11px] font-medium ${active ? 'is-active' : ''}`}
-                style={{ fontFamily: FONT_BODY }}
               >
                 <span className="eggy-tab-icon relative isolate flex items-center justify-center">
                   {active && (
@@ -1725,14 +1482,60 @@ function TabBar({ tab, setTab }) {
       </motion.nav>
     </LayoutGroup>
   );
+});
+
+// A skeleton of the real layout rather than a lone spinner: it shows the
+// shape of what's coming, so the first paint doesn't jump when data lands.
+// Also used by App while it checks the login, so app start is one
+// continuous placeholder instead of a spinner followed by a skeleton.
+export function DashboardSkeleton({ username }) {
+  return (
+    <div className="min-h-screen pb-28 bg-paper" aria-busy="true">
+      <Header username={username} />
+      <main className="max-w-4xl mx-auto px-4 pt-4 space-y-4">
+        <div className="eggy-card overflow-hidden">
+          <div className="p-5 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="eggy-skeleton rounded-full" style={{ width: 44, height: 44 }} />
+              <div className="eggy-skeleton h-3 w-24" />
+            </div>
+            <div className="eggy-skeleton h-9 w-52 mt-4" />
+          </div>
+          <div className="grid grid-cols-2 border-t border-hairline">
+            {[0, 1].map((i) => (
+              <div key={i} className={`px-5 py-3 ${i ? 'border-l border-hairline' : ''}`}>
+                <div className="eggy-skeleton h-2.5 w-16" />
+                <div className="eggy-skeleton h-4 w-24 mt-2" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="eggy-card p-4">
+              <div className="flex items-center gap-2.5">
+                <div className="eggy-skeleton rounded-full" style={{ width: 32, height: 32 }} />
+                <div className="eggy-skeleton h-2.5 w-16" />
+              </div>
+              <div className="eggy-skeleton h-5 w-24 mt-3" />
+            </div>
+          ))}
+        </div>
+        <div className="eggy-card p-5">
+          <div className="eggy-skeleton h-4 w-40 mb-4" />
+          <div className="eggy-skeleton w-full" style={{ height: CHART.height }} />
+        </div>
+      </main>
+    </div>
+  );
 }
 
-export default function EggFarmDashboard({ username, onLogout }) {
+export default function EggFarmDashboard({ username, onLogout, initialLedger }) {
   const {
     sales, expenses, harvests, loading, error, syncStatus, clearError, retry,
     addSale, updateSale, updateSaleStatus, deleteSale,
     addExpense, updateExpense, deleteExpense, addHarvest, deleteHarvest,
-  } = useLedger();
+  } = useLedger(initialLedger);
   const [tab, setTab] = useState('dashboard');
   const [direction, setDirection] = useState(1);
   const [granularity, setGranularity] = useState('daily');
@@ -1742,66 +1545,21 @@ export default function EggFarmDashboard({ username, onLogout }) {
   // Switching modes (Day/Week/Month/Year) resets the picker to "now" in
   // that mode, rather than leaving it on a value that no longer makes
   // sense (e.g. a leftover week string after switching to Year).
-  function handleAvgGranularityChange(g) {
+  const handleAvgGranularityChange = useCallback((g) => {
     setAvgGranularity(g);
     setAvgPeriodValue(getPeriodDefaultValue(g));
-  }
-
-  useEffect(() => {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Bitter:wght@500;600;700&family=Work+Sans:wght@400;500;600&display=swap';
-    document.head.appendChild(link);
-    return () => { document.head.removeChild(link); };
   }, []);
 
+  const selectTab = useCallback((next) => {
+    if (next === tab) return;
+    setDirection(TAB_ORDER.indexOf(next) > TAB_ORDER.indexOf(tab) ? 1 : -1);
+    setTab(next);
+  }, [tab]);
+
   // Pending (utang) sales aren't real revenue yet — exclude them from every
-  // stat/chart below so the dashboard only reflects money actually received.
-  // They still appear in the Records list so they can be tracked and paid.
+  // stat/chart so the dashboard only reflects money actually received.
+  // They still appear in Records so they can be tracked and paid.
   const paidSales = useMemo(() => sales.filter((s) => s.status !== 'pending'), [sales]);
-
-  const totalRevenue = useMemo(() => paidSales.reduce((s, x) => s + saleTotal(x), 0), [paidSales]);
-  const totalExpenses = useMemo(() => expenses.reduce((s, x) => s + x.quantity * x.price, 0), [expenses]);
-  const totalEggs = useMemo(() => paidSales.reduce((s, x) => s + x.quantity, 0), [paidSales]);
-  const avgPricePerEgg = totalEggs ? totalRevenue / totalEggs : 0;
-  const netProfit = totalRevenue - totalExpenses;
-
-  const chartData = useMemo(() => aggregateByPeriod(paidSales, expenses, granularity), [paidSales, expenses, granularity]);
-  const avgRevenuePerPeriod = chartData.length ? chartData.reduce((s, d) => s + d.revenue, 0) / chartData.length : 0;
-
-  const sizeBreakdown = useMemo(() => aggregateBy(paidSales, (s) => s.eggSize, (s) => s.quantity), [paidSales]);
-  const expenseBreakdown = useMemo(() => aggregateBy(expenses, (e) => e.item, (e) => e.quantity * e.price), [expenses]);
-
-  // Average per harvest record entered (in practice usually one per day) —
-  // matches the requested "average production and reject eggs" directly,
-  // without needing the same day/week/month granularity machinery the
-  // revenue chart uses.
-  const totalHarvested = useMemo(() => harvests.reduce((s, h) => s + h.harvested, 0), [harvests]);
-  const totalRejected = useMemo(() => harvests.reduce((s, h) => s + h.rejected, 0), [harvests]);
-  const avgHarvested = harvests.length ? Math.round(totalHarvested / harvests.length) : 0;
-  const avgRejected = harvests.length ? Math.round(totalRejected / harvests.length) : 0;
-
-  // "Period Averages" card: independent of the granularity above (which
-  // drives the Revenue vs Expenses trend). This lets a specific day/week/
-  // month/year be picked and shows the profit — paid sales minus expenses,
-  // the same way netProfit is computed above but scoped to just that period
-  // instead of all-time.
-  const avgPeriodSales = useMemo(
-    () => paidSales.filter((s) => isInSelectedPeriod(s.date, avgGranularity, avgPeriodValue)),
-    [paidSales, avgGranularity, avgPeriodValue]
-  );
-  const avgPeriodExpenses = useMemo(
-    () => expenses.filter((e) => isInSelectedPeriod(e.date, avgGranularity, avgPeriodValue)),
-    [expenses, avgGranularity, avgPeriodValue]
-  );
-  const periodSalesTotal = avgPeriodSales.reduce((s, s2) => s + saleTotal(s2), 0);
-  const periodExpensesTotal = avgPeriodExpenses.reduce((s, e) => s + e.quantity * e.price, 0);
-  const periodProfit = periodSalesTotal - periodExpensesTotal;
-  const avgPeriodLabel = formatSelectedPeriodLabel(avgGranularity, avgPeriodValue);
-  const avgPeriodCounts = {
-    expenses: avgPeriodExpenses.length,
-    sales: avgPeriodSales.length,
-  };
 
   const availableYears = useMemo(() => {
     const years = new Set([String(new Date().getFullYear())]);
@@ -1811,42 +1569,10 @@ export default function EggFarmDashboard({ username, onLogout }) {
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [sales, expenses, harvests]);
 
-  // A skeleton of the real layout rather than a lone spinner: it shows the
-  // shape of what's coming, so the first paint doesn't jump when data lands.
-  if (loading) {
-    return (
-      <div className="min-h-screen pb-24" style={{ backgroundColor: COLORS.paper, fontFamily: FONT_BODY }}>
-        <Header username={username} />
-        <main className="max-w-4xl mx-auto px-4 pt-4 space-y-3">
-          <div className="eggy-card p-5">
-            <div className="flex items-center gap-4">
-              <div className="eggy-skeleton rounded-full" style={{ width: 54, height: 54 }} />
-              <div className="flex-1">
-                <div className="eggy-skeleton h-3 w-24 mb-3" />
-                <div className="eggy-skeleton h-8 w-44" />
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="eggy-card p-4">
-                <div className="eggy-skeleton rounded-full" style={{ width: 38, height: 38 }} />
-                <div className="eggy-skeleton h-2.5 w-16 mt-4" />
-                <div className="eggy-skeleton h-5 w-24 mt-2" />
-              </div>
-            ))}
-          </div>
-          <div className="eggy-card p-5">
-            <div className="eggy-skeleton h-4 w-40 mb-4" />
-            <div className="eggy-skeleton h-[200px] w-full" />
-          </div>
-        </main>
-      </div>
-    );
-  }
+  if (loading) return <DashboardSkeleton username={username} />;
 
   return (
-    <div className="min-h-screen pb-24" style={{ backgroundColor: COLORS.paper, fontFamily: FONT_BODY, color: COLORS.ink }}>
+    <div className="min-h-screen pb-28 bg-paper text-ink">
       <Header username={username} onLogout={onLogout} />
       <main className="max-w-4xl mx-auto px-4 pt-4">
         <SyncBanner status={syncStatus} />
@@ -1854,35 +1580,21 @@ export default function EggFarmDashboard({ username, onLogout }) {
         <ScreenTransition viewKey={tab} direction={direction} resetScroll>
           {tab === 'dashboard' && (
             <DashboardView
-              totalRevenue={totalRevenue}
-              totalExpenses={totalExpenses}
-              netProfit={netProfit}
-              totalEggs={totalEggs}
-              avgPricePerEgg={avgPricePerEgg}
-              avgRevenuePerPeriod={avgRevenuePerPeriod}
+              sales={sales}
+              paidSales={paidSales}
+              expenses={expenses}
+              harvests={harvests}
               granularity={granularity}
-              setGranularity={setGranularity}
-              chartData={chartData}
-              sizeBreakdown={sizeBreakdown}
-              expenseBreakdown={expenseBreakdown}
-              hasSales={sales.length > 0}
-              hasExpenses={expenses.length > 0}
-              avgHarvested={avgHarvested}
-              avgRejected={avgRejected}
+              onGranularityChange={setGranularity}
               avgGranularity={avgGranularity}
               onAvgGranularityChange={handleAvgGranularityChange}
               avgPeriodValue={avgPeriodValue}
               onAvgPeriodValueChange={setAvgPeriodValue}
               availableYears={availableYears}
-              avgPeriodLabel={avgPeriodLabel}
-              periodSalesTotal={periodSalesTotal}
-              periodExpensesTotal={periodExpensesTotal}
-              periodProfit={periodProfit}
-              avgPeriodCounts={avgPeriodCounts}
             />
           )}
-          {tab === 'addSale' && <AddSaleForm onSubmit={addSale} />}
-          {tab === 'addExpense' && <AddExpenseForm onSubmit={addExpense} />}
+          {tab === 'addSale' && <SaleForm onSubmit={addSale} />}
+          {tab === 'addExpense' && <ExpenseForm onSubmit={addExpense} />}
           {tab === 'addHarvest' && <AddHarvestForm onSubmit={addHarvest} />}
           {tab === 'records' && (
             <RecordsView
@@ -1899,10 +1611,7 @@ export default function EggFarmDashboard({ username, onLogout }) {
           )}
         </ScreenTransition>
       </main>
-      <TabBar tab={tab} setTab={(next) => {
-        setDirection(TAB_ORDER.indexOf(next) > TAB_ORDER.indexOf(tab) ? 1 : -1);
-        setTab(next);
-      }} />
+      <TabBar tab={tab} onSelect={selectTab} />
     </div>
   );
 }

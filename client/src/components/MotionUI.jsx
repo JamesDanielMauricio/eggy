@@ -5,9 +5,10 @@ import {
 } from 'motion/react';
 import { CheckCircle2 } from 'lucide-react';
 import { SPRING } from '../lib/motion';
+// Cached formatter: AnimatedNumber formats on every animation frame.
+import { formatCount } from '../lib/format';
 
 const EASE = [0.22, 1, 0.36, 1];
-const formatCount = (value) => Math.round(value).toLocaleString('en-US');
 
 // Keep the outgoing screen long enough to leave, without allowing its
 // controls to receive another click or keyboard focus during the exit.

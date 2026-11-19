@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from './api';
+import { sameRows } from './rows';
 
 const COLLECTIONS = ['sales', 'expenses', 'harvests'];
 const REFRESH_INTERVAL = 30_000;
 
-export function useLedger() {
+// `initialRequest` is an already-started getLedger() promise (App.jsx starts
+// it alongside the login check); the first load uses it instead of asking
+// again, which saves a full round trip on every app open.
+export function useLedger(initialRequest) {
   const [ledger, setLedger] = useState({ sales: [], expenses: [], harvests: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -15,7 +19,7 @@ export function useLedger() {
   const revisions = useRef({ sales: 0, expenses: 0, harvests: 0 });
   const writes = useRef(new Set());
 
-  const load = useCallback(({ background = false, force = false } = {}) => {
+  const load = useCallback(({ background = false, force = false, request } = {}) => {
     if (inFlight.current) return inFlight.current.promise;
     if (background && !force && Date.now() - lastLoaded.current < REFRESH_INTERVAL) return;
 
@@ -29,7 +33,7 @@ export function useLedger() {
     const syncingTimer = background ? setTimeout(() => markSync('syncing'), 500) : null;
     const slowTimer = background ? setTimeout(() => markSync('slow'), 3000) : null;
 
-    const promise = api.getLedger({ signal: controller.signal })
+    const promise = (request ?? api.getLedger({ signal: controller.signal }))
       .then((fresh) => {
         if (!mounted.current || controller.signal.aborted) return;
         // A refresh started before an edit must never restore the old row,
@@ -37,10 +41,15 @@ export function useLedger() {
         const unchanged = COLLECTIONS.filter((collection) => (
           !pendingAtStart.has(collection) && startingRevisions[collection] === revisions.current[collection]
         ));
-        setLedger((previous) => ({
-          ...previous,
-          ...Object.fromEntries(unchanged.map((collection) => [collection, fresh[collection]])),
-        }));
+        // Most background refreshes bring back exactly what's on screen.
+        // Keeping the existing arrays in that case (and returning the same
+        // state object when nothing at all changed) lets React skip the
+        // re-render, instead of redrawing every chart with identical data.
+        setLedger((previous) => {
+          const changed = unchanged.filter((collection) => !sameRows(previous[collection], fresh[collection]));
+          if (changed.length === 0) return previous;
+          return { ...previous, ...Object.fromEntries(changed.map((collection) => [collection, fresh[collection]])) };
+        });
         if (unchanged.length === COLLECTIONS.length) lastLoaded.current = Date.now();
       })
       .catch((err) => {
@@ -61,9 +70,13 @@ export function useLedger() {
     return promise;
   }, []);
 
+  // Only the first mount may use the head-start request; it's read through a
+  // ref so the effect below doesn't re-run if the parent re-renders.
+  const initialRequestRef = useRef(initialRequest);
+
   useEffect(() => {
     mounted.current = true;
-    load();
+    load({ request: initialRequestRef.current ?? undefined });
     const resume = () => {
       if (document.visibilityState === 'visible') load({ background: true });
     };

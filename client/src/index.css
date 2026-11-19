@@ -1,12 +1,10 @@
 @import "tailwindcss";
 
-/* Mirrors lib/theme.js — see the note there. These exist so the interaction
-   states below (:hover, :active, :focus-visible) can use the palette; inline
-   styles in the components use the JS copy. */
+/* Mirrors lib/theme.js — see the note there. */
 :root {
   --eggy-ink: #241C13;
   --eggy-ink-soft: #6A5F4E;
-  --eggy-muted: #9C9282;
+  --eggy-muted: #7A7060;
 
   --eggy-paper: #EDF0E2;
   --eggy-card: #FFFDF8;
@@ -20,8 +18,10 @@
 
   --eggy-moss: #4D7A3E;
   --eggy-brick: #9B4433;
+  --eggy-pending: #8F5C10;
 
   --eggy-hairline: #EFE9DA;
+  --eggy-card-border: #E9E3D1;
   --eggy-input-border: #DDD6C2;
 
   --eggy-elev-sm: 0 1px 2px rgba(61, 40, 23, 0.04), 0 1px 3px rgba(61, 40, 23, 0.06);
@@ -31,6 +31,33 @@
 
   --eggy-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --eggy-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Tailwind theme: `--font-sans` becomes the page's default font (Tailwind's
+   base styles apply it to <html>), and `font-display` is the slab serif for
+   headings. */
+@theme {
+  --font-sans: 'Work Sans Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Bitter Variable', Georgia, serif;
+}
+
+/* The palette as Tailwind colour utilities: `text-ink`, `bg-card`,
+   `border-hairline`… `inline` makes each utility point at the variable
+   above, so there's still exactly one place each colour is defined. */
+@theme inline {
+  --color-ink: var(--eggy-ink);
+  --color-ink-soft: var(--eggy-ink-soft);
+  --color-muted: var(--eggy-muted);
+  --color-paper: var(--eggy-paper);
+  --color-card: var(--eggy-card);
+  --color-card-alt: var(--eggy-card-alt);
+  --color-barnwood: var(--eggy-barnwood);
+  --color-yolk: var(--eggy-yolk);
+  --color-gold: var(--eggy-gold);
+  --color-moss: var(--eggy-moss);
+  --color-brick: var(--eggy-brick);
+  --color-pending: var(--eggy-pending);
+  --color-hairline: var(--eggy-hairline);
 }
 
 html {
@@ -43,6 +70,7 @@ html {
 
 body {
   background-color: var(--eggy-paper);
+  color: var(--eggy-ink);
   /* Stops the rubber-band overscroll on iOS revealing white behind the app. */
   overscroll-behavior-y: none;
 }
@@ -71,10 +99,13 @@ body {
 
 /* Opt-in: only for cards that are actually a target (record rows), not for
    static stat panels — a panel that lifts under the cursor but does nothing
-   when clicked reads as broken. */
-.eggy-card-interactive:hover {
-  box-shadow: var(--eggy-elev-lg);
-  transform: translateY(-1px);
+   when clicked reads as broken. Hover-capable pointers only, so a tap on a
+   phone doesn't leave a row stuck "lifted". */
+@media (hover: hover) {
+  .eggy-card-interactive:hover {
+    box-shadow: var(--eggy-elev-lg);
+    transform: translateY(-1px);
+  }
 }
 
 .eggy-card-flush {
@@ -82,6 +113,41 @@ body {
   border: 1px solid var(--eggy-hairline);
   border-radius: 14px;
   box-shadow: var(--eggy-elev-sm);
+}
+
+/* A recessed panel inside a card (period totals, hero split). */
+.eggy-inset {
+  background-color: var(--eggy-card-alt);
+  border: 1px solid var(--eggy-hairline);
+  border-radius: 14px;
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────── */
+
+/* Small uppercase label over a figure ("NET PROFIT", "EGGS SOLD"). */
+.eggy-overline {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--eggy-muted);
+}
+
+/* Field label above an input or a group of chips. */
+.eggy-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-bottom: 0.375rem;
+  color: var(--eggy-ink-soft);
+}
+
+/* Small helper text under a field. */
+.eggy-hint {
+  display: block;
+  font-size: 11px;
+  margin-top: 0.25rem;
+  color: var(--eggy-muted);
 }
 
 /* ── Press feedback ───────────────────────────────────────────────────── */
@@ -122,13 +188,15 @@ body {
   filter: brightness(1.07);
 }
 
+/* Dark text on yolk: white on this yellow was only 1.9–3.0:1, so "Mark
+   Paid" and "Add Pending Sale" were hard to read outdoors. 7.6:1 now. */
 .eggy-btn-accent {
-  background-image: linear-gradient(to bottom, #EFB447, var(--eggy-yolk-deep));
-  color: #fff;
-  box-shadow: var(--eggy-elev-md), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  background-image: linear-gradient(to bottom, #F2C062, #E0A43A);
+  color: var(--eggy-barnwood-deep);
+  box-shadow: var(--eggy-elev-md), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .eggy-btn-accent:hover:not(:disabled) {
-  filter: brightness(1.05);
+  filter: brightness(1.04);
 }
 
 .eggy-btn-quiet {
@@ -141,27 +209,37 @@ body {
   color: var(--eggy-ink);
 }
 
-/* Icon-only actions get a real 36px hit area and a soft hover pad, instead of
-   a bare 16px glyph that's easy to miss with a thumb. */
+.eggy-btn-danger {
+  background-color: var(--eggy-brick);
+  color: #fff;
+  box-shadow: var(--eggy-elev-sm);
+}
+
+/* Icon-only actions get a real hit area and a soft hover pad, instead of a
+   bare 16px glyph that's easy to miss with a thumb. */
 .eggy-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   color: var(--eggy-muted);
   transition: background-color 160ms var(--eggy-ease-out), color 160ms var(--eggy-ease-out),
     transform 120ms var(--eggy-ease-out);
 }
-.eggy-icon-btn:hover {
+.eggy-icon-btn:hover:not(:disabled) {
   background-color: var(--eggy-card-alt);
   color: var(--eggy-ink);
 }
-.eggy-icon-btn:active {
+.eggy-icon-btn:active:not(:disabled) {
   transform: scale(0.92);
 }
-.eggy-icon-btn-danger:hover {
+.eggy-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.eggy-icon-btn-danger:hover:not(:disabled) {
   background-color: #F7E9E5;
   color: var(--eggy-brick);
 }
@@ -169,18 +247,24 @@ body {
 /* ── Inputs ───────────────────────────────────────────────────────────── */
 
 .eggy-input {
+  background-color: #fff;
+  border: 1px solid var(--eggy-input-border);
+  color: var(--eggy-ink);
   border-radius: 11px;
   padding: 0.625rem 0.75rem;
   outline: none;
   transition: border-color 160ms var(--eggy-ease-out), box-shadow 160ms var(--eggy-ease-out),
     background-color 160ms var(--eggy-ease-out);
 }
-.eggy-input:hover:not(:focus) {
+.eggy-input:hover:not(:focus):not(:disabled) {
   border-color: #CDC4AC;
 }
 .eggy-input:focus {
   border-color: var(--eggy-yolk);
   box-shadow: 0 0 0 3px rgba(229, 166, 46, 0.22);
+}
+.eggy-input:disabled {
+  background-color: var(--eggy-card-alt);
 }
 .eggy-input::placeholder {
   color: #B8AF9C;
@@ -206,6 +290,45 @@ body {
   outline: 2px solid var(--eggy-yolk);
   outline-offset: 2px;
   border-radius: 10px;
+}
+
+/* ── Choice chips (egg size, expense item) ────────────────────────────── */
+
+/* Each chip is a real radio button, visually hidden, inside a <label> — so
+   arrow keys, screen readers and form semantics all work for free, and a
+   tap anywhere on the chip selects it. One tap instead of open-scroll-pick
+   in a native dropdown. */
+.eggy-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 0.875rem;
+  border-radius: 999px;
+  border: 1px solid var(--eggy-input-border);
+  background-color: #fff;
+  color: var(--eggy-ink-soft);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 160ms var(--eggy-ease-out), border-color 160ms var(--eggy-ease-out),
+    color 160ms var(--eggy-ease-out), transform 120ms var(--eggy-ease-out);
+}
+.eggy-chip:active {
+  transform: scale(0.96);
+}
+.eggy-chip.is-active {
+  background-color: var(--eggy-barnwood);
+  border-color: var(--eggy-barnwood);
+  color: #fff;
+}
+.eggy-chip:has(input:focus-visible) {
+  outline: 2px solid var(--eggy-yolk);
+  outline-offset: 2px;
+}
+.eggy-chip:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* ── Segmented control (Day / Week / Month / Year, records sub-tabs) ───── */
@@ -315,6 +438,7 @@ body {
 
 /* Small, capped cascades keep the next field ready for a quick tap. */
 .eggy-form-flow > label,
+.eggy-form-flow > fieldset,
 .eggy-form-flow > div:not(.eggy-feedback-slot),
 .eggy-form-flow > button {
   animation: eggy-rise 420ms var(--eggy-ease-out) backwards;
@@ -333,6 +457,8 @@ body {
   margin: 0;
 }
 
+/* Equal-width digits for numbers that count up, so the figure doesn't
+   wobble sideways as its digits change during the animation. */
 .eggy-number { font-variant-numeric: tabular-nums; }
 .eggy-feedback-slot:empty { display: none; }
 .eggy-save-feedback {
@@ -354,17 +480,30 @@ body {
   animation: eggy-fade-in 390ms var(--eggy-ease-out) both;
 }
 
+/* Loading placeholder. The sheen is a separate layer that slides with
+   `transform`, which the browser runs on the compositor thread — so it keeps
+   sweeping smoothly even while the main thread is busy parsing the app or
+   rendering the dashboard (exactly when a skeleton is on screen). The old
+   version animated `background-position`, which repaints on the main thread
+   every frame and stutters under that load. Same sweep, same timing: a
+   gradient 180% of the box wide travelling right to left. */
 @keyframes eggy-shimmer {
-  from { background-position: -180% 0; }
-  to { background-position: 180% 0; }
+  from { transform: translateX(80%); }
+  to { transform: translateX(-80%); }
 }
 .eggy-skeleton {
+  position: relative;
+  overflow: hidden;
   background-color: #EDE7D8;
-  background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
-  background-size: 180% 100%;
-  background-repeat: no-repeat;
-  animation: eggy-shimmer 1.8s ease-in-out infinite;
   border-radius: 8px;
+}
+.eggy-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 180%;
+  background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
+  animation: eggy-shimmer 1.8s ease-in-out infinite;
 }
 
 }
@@ -386,6 +525,7 @@ body {
   .eggy-btn:active:not(:disabled),
   .eggy-press:active,
   .eggy-icon-btn:active,
+  .eggy-chip:active,
   .eggy-tab.is-active .eggy-tab-icon,
   .eggy-tab:active .eggy-tab-icon {
     transform: none;

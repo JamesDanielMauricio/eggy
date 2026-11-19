@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Loader2, Lock } from 'lucide-react';
-import { COLORS, FONT_DISPLAY, FONT_BODY, inputClasses, inputStyle } from './lib/theme';
+import { Eye, EyeOff, Loader2, Lock } from 'lucide-react';
+import BrandMark from './components/BrandMark';
+import { inputClasses } from './lib/theme';
 import { login } from './lib/api';
 
 export default function LoginPage({ onLoggedIn }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -24,67 +26,68 @@ export default function LoginPage({ onLoggedIn }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: COLORS.paper }}>
+    <div className="min-h-screen flex items-center justify-center px-4 py-10 bg-paper">
       <div className="w-full max-w-sm eggy-rise">
-        <div className="flex flex-col items-center mb-6">
-          <div
-            className="w-14 h-14 rounded-full flex items-center justify-center mb-3"
-            style={{ border: `2px solid ${COLORS.yolk}`, backgroundColor: COLORS.barnwood, transform: 'rotate(-6deg)' }}
-          >
-            <span style={{ transform: 'rotate(6deg)' }} className="text-2xl">🥚</span>
-          </div>
-          <h1 className="text-xl font-bold tracking-tight" style={{ color: COLORS.ink, fontFamily: FONT_DISPLAY }}>
-            Egg Farm Ledger
-          </h1>
-          <p className="text-xs mt-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>Sign in to continue</p>
+        <div className="flex flex-col items-center text-center mb-7">
+          <BrandMark size={60} />
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink mt-4">Egg Farm Ledger</h1>
+          <p className="text-sm text-ink-soft mt-1">Sign in to record sales, expenses and harvests.</p>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="eggy-form-flow rounded-2xl p-5 shadow-sm space-y-4"
-          style={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.cardBorder}` }}
-        >
+        <form onSubmit={handleSubmit} className="eggy-card eggy-form-flow p-5 space-y-4">
           {error && (
-            <div
-              role="alert"
-              className="eggy-fade-in text-sm rounded-lg px-3 py-2"
-              style={{ backgroundColor: '#F7E6E1', border: `1px solid ${COLORS.brick}55`, color: COLORS.brick, fontFamily: FONT_BODY }}
-            >
+            <div role="alert" className="eggy-fade-in text-sm rounded-xl px-3 py-2.5 text-brick bg-[#F7E6E1] border border-[#9B443355]">
               {error}
             </div>
           )}
 
           <label className="block">
-            <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>Username</span>
+            <span className="eggy-label">Username</span>
+            {/* Phones capitalise the first letter of a text field by default,
+                which turned "demo" into "Demo" — and usernames are matched
+                exactly, so the login failed for no visible reason. */}
             <input
               type="text"
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
               className={inputClasses}
-              style={inputStyle}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
           </label>
 
           <label className="block">
-            <span className="block text-xs font-medium mb-1" style={{ color: COLORS.inkSoft, fontFamily: FONT_BODY }}>Password</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              required
-              className={inputClasses}
-              style={inputStyle}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <span className="eggy-label">Password</span>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                required
+                className={`${inputClasses} pr-12`}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              {/* Lets you check what you typed on a phone keyboard before
+                  submitting, instead of retyping after a failed attempt. */}
+              <button
+                type="button"
+                onClick={() => setShowPassword((shown) => !shown)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                className="eggy-icon-btn eggy-focus absolute right-1 top-1/2 -translate-y-1/2"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </label>
 
           <button
             type="submit"
             disabled={submitting}
-            className="eggy-btn eggy-btn-primary eggy-focus w-full font-semibold py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-60"
-            style={{ backgroundColor: COLORS.barnwood, color: '#FFFFFF', fontFamily: FONT_BODY }}
+            className="eggy-btn eggy-btn-primary eggy-focus w-full py-3 flex items-center justify-center gap-2"
           >
             {submitting ? <Loader2 size={16} className="animate-spin" /> : <Lock size={16} />}
             {submitting ? 'Signing in…' : 'Sign in'}
