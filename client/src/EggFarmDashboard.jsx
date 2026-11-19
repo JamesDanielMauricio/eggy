@@ -64,6 +64,13 @@ const ICONS = {
 const WHOLE_NUMBER_INPUT = { type: 'number', inputMode: 'numeric', pattern: '[0-9]*', min: '0', step: '1' };
 const MONEY_INPUT = { type: 'number', inputMode: 'decimal', min: '0', step: '0.01' };
 
+// An editor opened in Records sits above the rows around it. When it opens,
+// the rows below glide down into place, and they used to be painted over its
+// Save/Cancel buttons for about half a second, so a quick tap hit a row
+// instead. z-index 1 lifts it over the rows while keeping it under the
+// sticky record switcher (z-10) and the header.
+const EDITING_CARD_CLASS = 'eggy-rise relative z-[1]';
+
 const expenseTotal = (e) => e.quantity * e.price;
 const formatEggs = (n) => `${formatCount(n)} eggs`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -864,7 +871,7 @@ function SaleForm({ sale, onSubmit, onCancel }) {
   }
 
   return (
-    <section className={`eggy-card p-5 ${editing ? 'eggy-rise' : ''}`} style={editing ? { borderColor: COLORS.yolk, boxShadow: ELEVATION.lg } : undefined}>
+    <section className={`eggy-card p-5 ${editing ? EDITING_CARD_CLASS : ''}`} style={editing ? { borderColor: COLORS.yolk, boxShadow: ELEVATION.lg } : undefined}>
       <FormTitle icon={editing ? Pencil : Plus} color={COLORS.moss}>{editing ? 'Edit Sale' : 'Record a Sale'}</FormTitle>
       <form onSubmit={handleSubmit}>
         <fieldset disabled={saving} className="eggy-form-flow space-y-4">
@@ -984,7 +991,7 @@ function ExpenseForm({ expense, onSubmit, onCancel }) {
   }
 
   return (
-    <section className={`eggy-card p-5 ${editing ? 'eggy-rise' : ''}`} style={editing ? { borderColor: COLORS.yolk, boxShadow: ELEVATION.lg } : undefined}>
+    <section className={`eggy-card p-5 ${editing ? EDITING_CARD_CLASS : ''}`} style={editing ? { borderColor: COLORS.yolk, boxShadow: ELEVATION.lg } : undefined}>
       <FormTitle icon={editing ? Pencil : Wallet} color={COLORS.brick}>{editing ? 'Edit Expense' : 'Record an Expense'}</FormTitle>
       <form onSubmit={handleSubmit}>
         <fieldset disabled={saving} className="eggy-form-flow space-y-4">

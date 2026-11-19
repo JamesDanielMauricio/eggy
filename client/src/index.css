@@ -75,6 +75,17 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* The login ↔ dashboard transition slides a full-width screen in from 14px
+   to the right. Unclipped, that made the page briefly 14px wider than the
+   phone, so mobile browsers zoomed out for a moment and taps landed in the
+   wrong place. `clip` (unlike `hidden`) doesn't create a scroll container,
+   so the sticky header and records switcher still stick. It's on #root, not
+   body, because body's overflow is handed to the browser window, where
+   `clip` becomes `hidden`. */
+#root {
+  overflow-x: clip;
+}
+
 /* Removes the grey flash Safari/Chrome paint over tapped elements — it makes
    every tap look like a mis-hit on an otherwise polished surface. */
 * {
